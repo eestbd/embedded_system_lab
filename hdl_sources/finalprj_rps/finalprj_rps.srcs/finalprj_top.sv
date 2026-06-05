@@ -138,112 +138,103 @@ module CONTROL (
 );
 
 //=========================================================================
-// Single-tile engine parameters
+// 4-layer MLP sequencer parameters
 //=========================================================================
 
-localparam int N            = 16;
-localparam int DATA_W       = 8;
-localparam int ACC_W        = 32;
-localparam int WORD_W       = 128;
-localparam int ADDR_W       = 14;
-localparam int SCALE_W      = 32;
-localparam int SCALE_FRAC   = 24;
-
-localparam logic [ADDR_W-1:0] ACT_BASE_ADDR = 14'h0100;
-localparam logic [ADDR_W-1:0] WGT_BASE_ADDR = 14'h0200;
-localparam logic [ADDR_W-1:0] OUT_BASE_ADDR = 14'h2880;
-localparam logic [SCALE_W-1:0] SCALE_M4_Q24 = 32'd16777216;
+localparam int N           = 16;
+localparam int DATA_W      = 8;
+localparam int ACC_W       = 32;
+localparam int WORD_W      = 128;
+localparam int ADDR_W      = 14;
+localparam int SCALE_W     = 32;
+localparam int SCALE_FRAC  = 24;
 
 typedef enum logic [2:0] {
     TOP_IDLE,
-    TOP_START_ENGINE,
-    TOP_WAIT_ENGINE,
+    TOP_START_SEQ,
+    TOP_WAIT_SEQ,
     TOP_DONE
 } state_t;
 
 state_t r_state;
 
-logic engine_start;
-logic engine_busy;
-logic engine_done;
+logic seq_start;
+logic seq_busy;
+logic seq_done;
 
-logic engine_bram_act_en;
-logic [ADDR_W-1:0] engine_bram_act_addr;
-logic [WORD_W-1:0] engine_bram_act_rdata;
+logic seq_bram_act_en;
+logic [ADDR_W-1:0] seq_bram_act_addr;
+logic [WORD_W-1:0] seq_bram_act_rdata;
 
-logic engine_bram_wgt_en;
-logic [ADDR_W-1:0] engine_bram_wgt_addr;
-logic [WORD_W-1:0] engine_bram_wgt_rdata;
+logic seq_bram_wgt_en;
+logic [ADDR_W-1:0] seq_bram_wgt_addr;
+logic [WORD_W-1:0] seq_bram_wgt_rdata;
 
-logic engine_bram_out_wr;
-logic [ADDR_W-1:0] engine_bram_out_addr;
-logic [WORD_W-1:0] engine_bram_out_wdata;
+logic seq_bram_out_wr;
+logic [ADDR_W-1:0] seq_bram_out_addr;
+logic [WORD_W-1:0] seq_bram_out_wdata;
 
-logic engine_pa_conflict;
-logic engine_en;
+logic seq_pa_conflict;
+logic seq_en;
 
 // Kept as debug/tap registers for waveform compatibility with earlier bring-up TBs.
 logic [127:0] r_pa_read_data_capture;
 logic         r_pa_read_data_valid;
 
-assign engine_start = (r_state == TOP_START_ENGINE);
-assign engine_en    = !i_PA_BUSY;
+assign seq_start = (r_state == TOP_START_SEQ);
+assign seq_en    = !i_PA_BUSY;
 
-assign engine_bram_act_rdata = i_PA_RDATA;
-assign engine_bram_wgt_rdata = i_PB_RDATA;
-assign engine_pa_conflict    = engine_bram_out_wr && engine_bram_act_en;
+assign seq_bram_act_rdata = i_PA_RDATA;
+assign seq_bram_wgt_rdata = i_PB_RDATA;
+assign seq_pa_conflict    = seq_bram_out_wr && seq_bram_act_en;
 
 // Port A is shared by activation read and output write.
-// The single-tile engine performs these phases separately; if a conflict ever
-// happens, output write wins so that completed data is not dropped.
+// The sequencer schedules read and write phases separately; if a conflict ever
+// happens, output write wins so completed data is not dropped.
 always_comb begin
     o_PA_WR    = 1'b0;
-    o_PA_ADDR  = engine_bram_act_addr;
+    o_PA_ADDR  = seq_bram_act_addr;
     o_PA_WDATA = '0;
 
-    if (engine_bram_out_wr) begin
+    if (seq_bram_out_wr) begin
         o_PA_WR    = 1'b1;
-        o_PA_ADDR  = engine_bram_out_addr;
-        o_PA_WDATA = engine_bram_out_wdata;
+        o_PA_ADDR  = seq_bram_out_addr;
+        o_PA_WDATA = seq_bram_out_wdata;
     end
 end
 
-// Port B is the weight read path. It is read-only in this phase.
+// Port B is the weight read path. It is read-only from RTL.
 always_comb begin
-    o_PB_ADDR  = engine_bram_wgt_addr;
+    o_PB_ADDR  = seq_bram_wgt_addr;
     o_PB_WR    = 1'b0;
     o_PB_WDATA = '0;
 end
 
-single_tile_engine_16x16 #(
-    .N         (N),
-    .DATA_W    (DATA_W),
-    .ACC_W     (ACC_W),
-    .WORD_W    (WORD_W),
-    .ADDR_W    (ADDR_W),
-    .SCALE_W   (SCALE_W),
-    .SCALE_FRAC(SCALE_FRAC)
-) u_engine (
+mlp_4layer_sequencer_16x16 #(
+    .N          (N),
+    .DATA_W     (DATA_W),
+    .ACC_W      (ACC_W),
+    .WORD_W     (WORD_W),
+    .ADDR_W     (ADDR_W),
+    .SCALE_W    (SCALE_W),
+    .SCALE_FRAC (SCALE_FRAC)
+) u_mlp_seq (
     .clk           (i_CLK),
     .rst           (!i_RST_n),
     .clear         (1'b0),
-    .start         (engine_start),
-    .en            (engine_en),
-    .act_base_addr (ACT_BASE_ADDR),
-    .wgt_base_addr (WGT_BASE_ADDR),
-    .out_base_addr (OUT_BASE_ADDR),
-    .scale_q       (SCALE_M4_Q24),
-    .bram_act_en   (engine_bram_act_en),
-    .bram_act_addr (engine_bram_act_addr),
-    .bram_act_rdata(engine_bram_act_rdata),
-    .bram_wgt_en   (engine_bram_wgt_en),
-    .bram_wgt_addr (engine_bram_wgt_addr),
-    .bram_wgt_rdata(engine_bram_wgt_rdata),
-    .bram_out_wr   (engine_bram_out_wr),
-    .bram_out_addr (engine_bram_out_addr),
-    .bram_out_wdata(engine_bram_out_wdata),
-    .busy          (engine_busy),
-    .done          (engine_done)
+    .start         (seq_start),
+    .en            (seq_en),
+    .bram_act_en   (seq_bram_act_en),
+    .bram_act_addr (seq_bram_act_addr),
+    .bram_act_rdata(seq_bram_act_rdata),
+    .bram_wgt_en   (seq_bram_wgt_en),
+    .bram_wgt_addr (seq_bram_wgt_addr),
+    .bram_wgt_rdata(seq_bram_wgt_rdata),
+    .bram_out_wr   (seq_bram_out_wr),
+    .bram_out_addr (seq_bram_out_addr),
+    .bram_out_wdata(seq_bram_out_wdata),
+    .busy          (seq_busy),
+    .done          (seq_done)
 );
 
 always_ff @(posedge i_CLK or negedge i_RST_n) begin
@@ -261,23 +252,23 @@ always_ff @(posedge i_CLK or negedge i_RST_n) begin
                 o_PROC_DONE <= 1'b0;
 
                 if (i_PROC_START) begin
-                    r_state <= TOP_START_ENGINE;
+                    r_state <= TOP_START_SEQ;
                 end
             end
 
-            TOP_START_ENGINE: begin
+            TOP_START_SEQ: begin
                 o_PROC_DONE <= 1'b0;
 
-                if (engine_en) begin
-                    r_state <= TOP_WAIT_ENGINE;
+                if (seq_en) begin
+                    r_state <= TOP_WAIT_SEQ;
                 end
             end
 
-            TOP_WAIT_ENGINE: begin
+            TOP_WAIT_SEQ: begin
                 o_PROC_DONE            <= 1'b0;
                 r_pa_read_data_capture <= i_PA_RDATA;
 
-                if (engine_done) begin
+                if (seq_done) begin
                     r_pa_read_data_valid <= 1'b1;
                     r_state              <= TOP_DONE;
                 end
