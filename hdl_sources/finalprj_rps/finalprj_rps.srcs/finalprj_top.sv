@@ -1,3 +1,5 @@
+`timescale 1ns/1ps
+
 module finalprj_top (
     //ports : DO NOT MODIFY
     input   wire                    i_CLK,
@@ -32,21 +34,32 @@ module finalprj_top (
 // BRAM instance : You can freely configure ports A and B
 //=========================================================================
 
+logic   [13:0]                  ctrl_pa_addr;
+logic                           ctrl_pa_wr;
+logic   [127:0]                 ctrl_pa_wdata;
+logic   [127:0]                 ctrl_pa_rdata;
+logic                           ctrl_pa_busy;
+
+logic   [13:0]                  ctrl_pb_addr;
+logic                           ctrl_pb_wr;
+logic   [127:0]                 ctrl_pb_wdata;
+logic   [127:0]                 ctrl_pb_rdata;
+
 BRAM_TDP #(
-    .INIT_FILE          ("bram_init.txt"            )
+    .INIT_FILE          ("C:/Users/super/Workspace/Embedded_System_Lab/hdl_sources/finalprj_rps/finalprj_rps.srcs/bram_init.txt"            )
 ) u_bram (
     //Port A - I/O path  (read input matrix, write output matrix) + AXI
-    .i_PA_ADDR          (14'd0                      ),
-    .i_PA_WR            (1'b0                       ),
-    .i_PA_WDATA         (128'd0                     ),
-    .o_PA_RDATA         (                           ),
-    .o_PA_BUSY          (                           ),
+    .i_PA_ADDR          (ctrl_pa_addr               ),
+    .i_PA_WR            (ctrl_pa_wr                 ),
+    .i_PA_WDATA         (ctrl_pa_wdata              ),
+    .o_PA_RDATA         (ctrl_pa_rdata              ),
+    .o_PA_BUSY          (ctrl_pa_busy               ),
 
     //Port B - weight path  (read only from RTL side)
-    .i_PB_ADDR          (14'd0                      ),
-    .i_PB_WR            (1'b0                       ),
-    .i_PB_WDATA         (128'd0                     ),
-    .o_PB_RDATA         (                           ),
+    .i_PB_ADDR          (ctrl_pb_addr               ),
+    .i_PB_WR            (ctrl_pb_wr                 ),
+    .i_PB_WDATA         (ctrl_pb_wdata              ),
+    .o_PB_RDATA         (ctrl_pb_rdata              ),
 
     //AXI4-Lite pass-through : DO NOT MODIFY FROM HERE
     .i_CLK              (i_CLK                      ),
@@ -82,7 +95,18 @@ CONTROL u_ctrl (
     .i_RST_n            (i_RST_n                    ),
 
     .i_PROC_START       (i_PROC_START               ),
-    .o_PROC_DONE        (o_PROC_DONE                )
+    .o_PROC_DONE        (o_PROC_DONE                ),
+
+    .o_PA_ADDR          (ctrl_pa_addr               ),
+    .o_PA_WR            (ctrl_pa_wr                 ),
+    .o_PA_WDATA         (ctrl_pa_wdata              ),
+    .i_PA_RDATA         (ctrl_pa_rdata              ),
+    .i_PA_BUSY          (ctrl_pa_busy               ),
+
+    .o_PB_ADDR          (ctrl_pb_addr               ),
+    .o_PB_WR            (ctrl_pb_wr                 ),
+    .o_PB_WDATA         (ctrl_pb_wdata              ),
+    .i_PB_RDATA         (ctrl_pb_rdata              )
 );
 
 endmodule
@@ -99,7 +123,18 @@ module CONTROL (
     input   wire                    i_RST_n,
 
     input   wire                    i_PROC_START,
-    output  logic                   o_PROC_DONE
+    output  logic                   o_PROC_DONE,
+
+    output  logic   [13:0]          o_PA_ADDR,
+    output  logic                   o_PA_WR,
+    output  logic   [127:0]         o_PA_WDATA,
+    input   wire    [127:0]         i_PA_RDATA,
+    input   wire                    i_PA_BUSY,
+
+    output  logic   [13:0]          o_PB_ADDR,
+    output  logic                   o_PB_WR,
+    output  logic   [127:0]         o_PB_WDATA,
+    input   wire    [127:0]         i_PB_RDATA
 );
 
 //=========================================================================
@@ -172,9 +207,86 @@ localparam int unsigned PP_SCALER [TOTAL_LAYERS] = '{
     32'hFFFF_FFFF //roughly 1.0
 };
 
-always @(i_CLK) begin
-    if(!i_RST_n) o_PROC_DONE <= 1'b0;
-    else if(i_PROC_START) o_PROC_DONE <= 1'b1;
+// First BRAM read probe for bring-up: input spectrogram base address.
+localparam logic [13:0] INPUT_SPECTROGRAM_BADDR = 14'h2400;
+
+typedef enum logic [2:0] {
+    ST_IDLE,
+    ST_READ_ADDR_SET,
+    ST_READ_WAIT,
+    ST_READ_CAPTURE,
+    ST_DONE
+} state_t;
+
+state_t         r_state;
+logic [127:0]  r_pa_read_data_capture;
+logic          r_pa_read_data_valid;
+
+always_ff @(posedge i_CLK or negedge i_RST_n) begin
+    if (!i_RST_n) begin
+        r_state                <= ST_IDLE;
+        o_PROC_DONE            <= 1'b0;
+
+        o_PA_ADDR              <= 14'd0;
+        o_PA_WR                <= 1'b0;
+        o_PA_WDATA             <= 128'd0;
+
+        o_PB_ADDR              <= 14'd0;
+        o_PB_WR                <= 1'b0;
+        o_PB_WDATA             <= 128'd0;
+
+        r_pa_read_data_capture <= 128'd0;
+        r_pa_read_data_valid   <= 1'b0;
+    end
+    else begin
+        o_PROC_DONE          <= 1'b0;
+        o_PA_WR              <= 1'b0;
+        o_PA_WDATA           <= 128'd0;
+        o_PB_ADDR            <= 14'd0;
+        o_PB_WR              <= 1'b0;
+        o_PB_WDATA           <= 128'd0;
+        r_pa_read_data_valid <= 1'b0;
+
+        case (r_state)
+            ST_IDLE: begin
+                o_PA_ADDR <= 14'd0;
+
+                if (i_PROC_START) begin
+                    o_PA_ADDR <= INPUT_SPECTROGRAM_BADDR;
+                    r_state   <= ST_READ_ADDR_SET;
+                end
+            end
+
+            ST_READ_ADDR_SET: begin
+                o_PA_ADDR <= INPUT_SPECTROGRAM_BADDR;
+
+                if (!i_PA_BUSY) begin
+                    r_state <= ST_READ_WAIT;
+                end
+            end
+
+            ST_READ_WAIT: begin
+                o_PA_ADDR <= INPUT_SPECTROGRAM_BADDR;
+                r_state   <= ST_READ_CAPTURE;
+            end
+
+            ST_READ_CAPTURE: begin
+                o_PA_ADDR              <= INPUT_SPECTROGRAM_BADDR;
+                r_pa_read_data_capture <= i_PA_RDATA;
+                r_pa_read_data_valid   <= 1'b1;
+                r_state                <= ST_DONE;
+            end
+
+            ST_DONE: begin
+                o_PA_ADDR   <= INPUT_SPECTROGRAM_BADDR;
+                o_PROC_DONE <= 1'b1;
+            end
+
+            default: begin
+                r_state <= ST_IDLE;
+            end
+        endcase
+    end
 end
 
 endmodule
@@ -199,7 +311,7 @@ endmodule
 //=========================================================================
 
 module BRAM_TDP #(
-    parameter INIT_FILE = "bram_init.txt"
+    parameter INIT_FILE = "C:/Users/super/Workspace/Embedded_System_Lab/hdl_sources/finalprj_rps/finalprj_rps.srcs/bram_init.txt"
 )(
     input   wire                i_CLK,
     input   wire                i_RST_n,

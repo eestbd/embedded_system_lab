@@ -4,22 +4,16 @@ module finalprj_tb;
 
 logic clk, rst_n, proc_start, proc_done;
 
-// Clock: 10ns period
+// Clock: 2ns period
 initial clk = 0;
 always #1 clk = ~clk;
 
-// You can observe internal signals like this:
-wire signed [31:0] pe_acc_tap [0:15][0:15];
-
-genvar gr, gc;
-generate
-    for (gr = 0; gr < 16; gr++) begin : g_tap_row
-        for (gc = 0; gc < 16; gc++) begin : g_tap_col
-            assign pe_acc_tap[gr][gc] =
-                u_dut.u_systolic.u_pe_arr.g_row[gr].g_col[gc].u_pe.acc;
-        end
-    end
-endgenerate
+// Bring-up taps for BRAM read timing.
+wire [2:0]   ctrl_state_tap         = u_dut.u_ctrl.r_state;
+wire [13:0]  ctrl_pa_addr_tap       = u_dut.u_ctrl.o_PA_ADDR;
+wire [127:0] ctrl_pa_rdata_tap      = u_dut.u_ctrl.i_PA_RDATA;
+wire [127:0] ctrl_pa_capture_tap    = u_dut.u_ctrl.r_pa_read_data_capture;
+wire         ctrl_pa_capture_valid  = u_dut.u_ctrl.r_pa_read_data_valid;
 
 // Instantiate finalprj top module
 finalprj_top u_dut (
@@ -30,6 +24,7 @@ finalprj_top u_dut (
     .o_PROC_DONE     (proc_done),
 
     // Set AXI bus as idle (do not modify)
+    .S_AXI_ARESETN  (rst_n),
     .S_AXI_AWADDR   (32'd0),
     .S_AXI_AWVALID  (1'b0),
     .S_AXI_AWREADY  (),
@@ -62,8 +57,12 @@ initial begin
     proc_start = 1'b0;
 
     // Wait for completion
-    //wait (proc_done);
-    //repeat (16) @(posedge clk);
+    wait (proc_done);
+    $display("CONTROL BRAM read addr    = 0x%04h", ctrl_pa_addr_tap);
+    $display("CONTROL BRAM read capture = 0x%032h", ctrl_pa_capture_tap);
+
+    repeat (16) @(posedge clk);
+    $finish;
 
 end
 
