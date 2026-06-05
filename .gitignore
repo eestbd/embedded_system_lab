@@ -1,0 +1,24 @@
+# Vivado generated
+**/.Xil/
+**/*.cache/
+**/*.gen/
+**/*.hw/
+**/*.ip_user_files/
+**/*.runs/
+**/*.sdk/
+**/*.sim/
+
+# Vivado logs
+*.jou
+*.log
+*.str
+
+# Installer
+PL2303_Prolific_DriverInstaller_v1.12.0.exe
+
+# VSCode
+.vscode/
+
+# Windows
+Thumbs.db
+Desktop.ini
