@@ -138,152 +138,158 @@ module CONTROL (
 );
 
 //=========================================================================
-// Basic useful parameters
+// Single-tile engine parameters
 //=========================================================================
 
-localparam int unsigned TOTAL_LAYERS = 4;
-localparam int unsigned BATCH_SIZE = 16;
-localparam int unsigned SYSTOLIC_SIZE = 16;
+localparam int N            = 16;
+localparam int DATA_W       = 8;
+localparam int ACC_W        = 32;
+localparam int WORD_W       = 128;
+localparam int ADDR_W       = 14;
+localparam int SCALE_W      = 32;
+localparam int SCALE_FRAC   = 24;
 
-localparam int unsigned W_DIMS [TOTAL_LAYERS][2] = '{
-//   ROWS  COLS
-    '{128,  768},
-    '{128,  128},
-    '{128,  128},
-    '{16,   128}
-};
-
-function automatic int unsigned calc_idim(int unsigned layer, dim);
-    if(dim == 0)       return BATCH_SIZE;         //ROWS: always the batch size
-    else begin                                    //COLS: input features for this layer
-        if(layer == 0) return W_DIMS[0][1];       //   | first layer: matches W COLS
-        else           return W_DIMS[layer-1][0]; //   | subsequent layers: prev W ROWS
-    end
-endfunction
-
-localparam int unsigned I_DIMS [TOTAL_LAYERS+1][2] = '{
-//   ROWS            COLS
-    '{calc_idim(0,0), calc_idim(0,1)},  //{16, 768}
-    '{calc_idim(1,0), calc_idim(1,1)},  //{16, 128}
-    '{calc_idim(2,0), calc_idim(2,1)},  //{16, 128}
-    '{calc_idim(3,0), calc_idim(3,1)},  //{16, 128}
-    '{calc_idim(4,0), calc_idim(4,1)}   //{16, 16}
-};
-
-//weight base address
-localparam int unsigned W_BADDR [TOTAL_LAYERS] = '{
-    32'h0000_0000,
-    32'h0000_1800,
-    32'h0000_1C00,
-    32'h0000_2000
-};
-
-//input base address
-localparam int unsigned I_BADDR [TOTAL_LAYERS] = '{
-    32'h0000_2400,
-    32'h0000_2700,
-    32'h0000_2780,
-    32'h0000_2800
-};
-
-//output base address
-localparam int unsigned O_BADDR [TOTAL_LAYERS] = '{
-    I_BADDR[1],
-    I_BADDR[2],
-    I_BADDR[3],
-    32'h0000_2880
-};
-
-/*
-    M1 = 0.00036199 x 2^32
-    M2 = 0.00143881 x 2^32
-    M3 = 0.01956364 x 2^32
-    M4 = 1.00000000 x 2^32
-*/
-localparam int unsigned PP_SCALER [TOTAL_LAYERS] = '{
-    32'h0017_B92F,
-    32'h005E_4B3A,
-    32'h0502_1F6A,
-    32'hFFFF_FFFF //roughly 1.0
-};
-
-// First BRAM read probe for bring-up: input spectrogram base address.
-localparam logic [13:0] INPUT_SPECTROGRAM_BADDR = 14'h2400;
+localparam logic [ADDR_W-1:0] ACT_BASE_ADDR = 14'h0100;
+localparam logic [ADDR_W-1:0] WGT_BASE_ADDR = 14'h0200;
+localparam logic [ADDR_W-1:0] OUT_BASE_ADDR = 14'h2880;
+localparam logic [SCALE_W-1:0] SCALE_M4_Q24 = 32'd16777216;
 
 typedef enum logic [2:0] {
-    ST_IDLE,
-    ST_READ_ADDR_SET,
-    ST_READ_WAIT,
-    ST_READ_CAPTURE,
-    ST_DONE
+    TOP_IDLE,
+    TOP_START_ENGINE,
+    TOP_WAIT_ENGINE,
+    TOP_DONE
 } state_t;
 
-state_t         r_state;
-logic [127:0]  r_pa_read_data_capture;
-logic          r_pa_read_data_valid;
+state_t r_state;
+
+logic engine_start;
+logic engine_busy;
+logic engine_done;
+
+logic engine_bram_act_en;
+logic [ADDR_W-1:0] engine_bram_act_addr;
+logic [WORD_W-1:0] engine_bram_act_rdata;
+
+logic engine_bram_wgt_en;
+logic [ADDR_W-1:0] engine_bram_wgt_addr;
+logic [WORD_W-1:0] engine_bram_wgt_rdata;
+
+logic engine_bram_out_wr;
+logic [ADDR_W-1:0] engine_bram_out_addr;
+logic [WORD_W-1:0] engine_bram_out_wdata;
+
+logic engine_pa_conflict;
+logic engine_en;
+
+// Kept as debug/tap registers for waveform compatibility with earlier bring-up TBs.
+logic [127:0] r_pa_read_data_capture;
+logic         r_pa_read_data_valid;
+
+assign engine_start = (r_state == TOP_START_ENGINE);
+assign engine_en    = !i_PA_BUSY;
+
+assign engine_bram_act_rdata = i_PA_RDATA;
+assign engine_bram_wgt_rdata = i_PB_RDATA;
+assign engine_pa_conflict    = engine_bram_out_wr && engine_bram_act_en;
+
+// Port A is shared by activation read and output write.
+// The single-tile engine performs these phases separately; if a conflict ever
+// happens, output write wins so that completed data is not dropped.
+always_comb begin
+    o_PA_WR    = 1'b0;
+    o_PA_ADDR  = engine_bram_act_addr;
+    o_PA_WDATA = '0;
+
+    if (engine_bram_out_wr) begin
+        o_PA_WR    = 1'b1;
+        o_PA_ADDR  = engine_bram_out_addr;
+        o_PA_WDATA = engine_bram_out_wdata;
+    end
+end
+
+// Port B is the weight read path. It is read-only in this phase.
+always_comb begin
+    o_PB_ADDR  = engine_bram_wgt_addr;
+    o_PB_WR    = 1'b0;
+    o_PB_WDATA = '0;
+end
+
+single_tile_engine_16x16 #(
+    .N         (N),
+    .DATA_W    (DATA_W),
+    .ACC_W     (ACC_W),
+    .WORD_W    (WORD_W),
+    .ADDR_W    (ADDR_W),
+    .SCALE_W   (SCALE_W),
+    .SCALE_FRAC(SCALE_FRAC)
+) u_engine (
+    .clk           (i_CLK),
+    .rst           (!i_RST_n),
+    .clear         (1'b0),
+    .start         (engine_start),
+    .en            (engine_en),
+    .act_base_addr (ACT_BASE_ADDR),
+    .wgt_base_addr (WGT_BASE_ADDR),
+    .out_base_addr (OUT_BASE_ADDR),
+    .scale_q       (SCALE_M4_Q24),
+    .bram_act_en   (engine_bram_act_en),
+    .bram_act_addr (engine_bram_act_addr),
+    .bram_act_rdata(engine_bram_act_rdata),
+    .bram_wgt_en   (engine_bram_wgt_en),
+    .bram_wgt_addr (engine_bram_wgt_addr),
+    .bram_wgt_rdata(engine_bram_wgt_rdata),
+    .bram_out_wr   (engine_bram_out_wr),
+    .bram_out_addr (engine_bram_out_addr),
+    .bram_out_wdata(engine_bram_out_wdata),
+    .busy          (engine_busy),
+    .done          (engine_done)
+);
 
 always_ff @(posedge i_CLK or negedge i_RST_n) begin
     if (!i_RST_n) begin
-        r_state                <= ST_IDLE;
+        r_state                <= TOP_IDLE;
         o_PROC_DONE            <= 1'b0;
-
-        o_PA_ADDR              <= 14'd0;
-        o_PA_WR                <= 1'b0;
-        o_PA_WDATA             <= 128'd0;
-
-        o_PB_ADDR              <= 14'd0;
-        o_PB_WR                <= 1'b0;
-        o_PB_WDATA             <= 128'd0;
-
         r_pa_read_data_capture <= 128'd0;
         r_pa_read_data_valid   <= 1'b0;
     end
     else begin
-        o_PROC_DONE          <= 1'b0;
-        o_PA_WR              <= 1'b0;
-        o_PA_WDATA           <= 128'd0;
-        o_PB_ADDR            <= 14'd0;
-        o_PB_WR              <= 1'b0;
-        o_PB_WDATA           <= 128'd0;
         r_pa_read_data_valid <= 1'b0;
 
         case (r_state)
-            ST_IDLE: begin
-                o_PA_ADDR <= 14'd0;
+            TOP_IDLE: begin
+                o_PROC_DONE <= 1'b0;
 
                 if (i_PROC_START) begin
-                    o_PA_ADDR <= INPUT_SPECTROGRAM_BADDR;
-                    r_state   <= ST_READ_ADDR_SET;
+                    r_state <= TOP_START_ENGINE;
                 end
             end
 
-            ST_READ_ADDR_SET: begin
-                o_PA_ADDR <= INPUT_SPECTROGRAM_BADDR;
+            TOP_START_ENGINE: begin
+                o_PROC_DONE <= 1'b0;
 
-                if (!i_PA_BUSY) begin
-                    r_state <= ST_READ_WAIT;
+                if (engine_en) begin
+                    r_state <= TOP_WAIT_ENGINE;
                 end
             end
 
-            ST_READ_WAIT: begin
-                o_PA_ADDR <= INPUT_SPECTROGRAM_BADDR;
-                r_state   <= ST_READ_CAPTURE;
-            end
-
-            ST_READ_CAPTURE: begin
-                o_PA_ADDR              <= INPUT_SPECTROGRAM_BADDR;
+            TOP_WAIT_ENGINE: begin
+                o_PROC_DONE            <= 1'b0;
                 r_pa_read_data_capture <= i_PA_RDATA;
-                r_pa_read_data_valid   <= 1'b1;
-                r_state                <= ST_DONE;
+
+                if (engine_done) begin
+                    r_pa_read_data_valid <= 1'b1;
+                    r_state              <= TOP_DONE;
+                end
             end
 
-            ST_DONE: begin
-                o_PA_ADDR   <= INPUT_SPECTROGRAM_BADDR;
+            TOP_DONE: begin
                 o_PROC_DONE <= 1'b1;
             end
 
             default: begin
-                r_state <= ST_IDLE;
+                r_state     <= TOP_IDLE;
+                o_PROC_DONE <= 1'b0;
             end
         endcase
     end
