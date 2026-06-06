@@ -31,14 +31,14 @@ module mlp_4layer_sequencer_16x16 #(
     output logic                         done
 );
 
-localparam logic [ADDR_W-1:0] INPUT_BASE = 14'h0000;
-localparam logic [ADDR_W-1:0] W1_BASE    = 14'h0300;
-localparam logic [ADDR_W-1:0] W2_BASE    = 14'h1B00;
-localparam logic [ADDR_W-1:0] W3_BASE    = 14'h1F00;
-localparam logic [ADDR_W-1:0] W4_BASE    = 14'h2300;
-localparam logic [ADDR_W-1:0] BUF0_BASE  = 14'h2700;
-localparam logic [ADDR_W-1:0] BUF1_BASE  = 14'h2780;
-localparam logic [ADDR_W-1:0] FINAL_BASE = 14'h2880;
+localparam logic [ADDR_W-1:0] W1_BASE       = 14'h0000;
+localparam logic [ADDR_W-1:0] W2_BASE       = 14'h1800;
+localparam logic [ADDR_W-1:0] W3_BASE       = 14'h1C00;
+localparam logic [ADDR_W-1:0] W4_BASE       = 14'h2000;
+localparam logic [ADDR_W-1:0] INPUT_BASE    = 14'h2400;
+localparam logic [ADDR_W-1:0] SCRATCH0_BASE = 14'h2700;
+localparam logic [ADDR_W-1:0] SCRATCH1_BASE = 14'h2780;
+localparam logic [ADDR_W-1:0] FINAL_BASE    = 14'h2880;
 
 localparam logic [ADDR_W-1:0] TILE_STRIDE = 14'd16;
 
@@ -67,6 +67,7 @@ logic [ADDR_W-1:0] current_act_base;
 logic [ADDR_W-1:0] current_wgt_base;
 logic [ADDR_W-1:0] current_out_base;
 logic [ADDR_W-1:0] current_wgt_out_stride;
+logic              current_act_layout_row_major;
 logic [K_TILES_W-1:0] current_num_k_tiles;
 logic [OUT_TILES_W-1:0] current_num_out_tiles;
 logic [SCALE_W-1:0] current_scale_q;
@@ -77,8 +78,9 @@ assign layer_start = en && (state == ST_START_LAYER);
 always_comb begin
     current_act_base       = INPUT_BASE;
     current_wgt_base       = W1_BASE;
-    current_out_base       = BUF0_BASE;
+    current_out_base       = SCRATCH0_BASE;
     current_wgt_out_stride = 14'd768;
+    current_act_layout_row_major = 1'b1;
     current_num_k_tiles    = 8'd48;
     current_num_out_tiles  = 8'd8;
     current_scale_q        = M1_Q24;
@@ -87,38 +89,42 @@ always_comb begin
         2'd0: begin
             current_act_base       = INPUT_BASE;
             current_wgt_base       = W1_BASE;
-            current_out_base       = BUF0_BASE;
+            current_out_base       = SCRATCH0_BASE;
             current_wgt_out_stride = 14'd768; // 48 K tiles * 16 words
+            current_act_layout_row_major = 1'b1; // input_spectrogram.bin is bram_init pre-tiled row-major
             current_num_k_tiles    = 8'd48;
             current_num_out_tiles  = 8'd8;
             current_scale_q        = M1_Q24;
         end
 
         2'd1: begin
-            current_act_base       = BUF0_BASE;
+            current_act_base       = SCRATCH0_BASE;
             current_wgt_base       = W2_BASE;
-            current_out_base       = BUF1_BASE;
+            current_out_base       = SCRATCH1_BASE;
             current_wgt_out_stride = 14'd128; // 8 K tiles * 16 words
+            current_act_layout_row_major = 1'b0; // intermediate activations are feature-major
             current_num_k_tiles    = 8'd8;
             current_num_out_tiles  = 8'd8;
             current_scale_q        = M2_Q24;
         end
 
         2'd2: begin
-            current_act_base       = BUF1_BASE;
+            current_act_base       = SCRATCH1_BASE;
             current_wgt_base       = W3_BASE;
-            current_out_base       = BUF0_BASE;
+            current_out_base       = SCRATCH0_BASE;
             current_wgt_out_stride = 14'd128;
+            current_act_layout_row_major = 1'b0;
             current_num_k_tiles    = 8'd8;
             current_num_out_tiles  = 8'd8;
             current_scale_q        = M3_Q24;
         end
 
         2'd3: begin
-            current_act_base       = BUF0_BASE;
+            current_act_base       = SCRATCH0_BASE;
             current_wgt_base       = W4_BASE;
             current_out_base       = FINAL_BASE;
             current_wgt_out_stride = 14'd128;
+            current_act_layout_row_major = 1'b0;
             current_num_k_tiles    = 8'd8;
             current_num_out_tiles  = 8'd1;
             current_scale_q        = M4_Q24;
@@ -145,6 +151,7 @@ single_layer_engine_feature_major_16x16 #(
     .act_base_addr  (current_act_base),
     .wgt_base_addr  (current_wgt_base),
     .out_base_addr  (current_out_base),
+    .act_layout_row_major(current_act_layout_row_major),
     .act_k_stride   (TILE_STRIDE),
     .wgt_k_stride   (TILE_STRIDE),
     .wgt_out_stride (current_wgt_out_stride),

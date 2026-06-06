@@ -16,11 +16,11 @@ localparam int IN_DIM  = 768;
 localparam int H_DIM   = 128;
 localparam int OUT_DIM = 16;
 
-localparam logic [ADDR_W-1:0] INPUT_BASE = 14'h0000;
-localparam logic [ADDR_W-1:0] W1_BASE    = 14'h0300;
-localparam logic [ADDR_W-1:0] W2_BASE    = 14'h1B00;
-localparam logic [ADDR_W-1:0] W3_BASE    = 14'h1F00;
-localparam logic [ADDR_W-1:0] W4_BASE    = 14'h2300;
+localparam logic [ADDR_W-1:0] INPUT_BASE = 14'h2400;
+localparam logic [ADDR_W-1:0] W1_BASE    = 14'h0000;
+localparam logic [ADDR_W-1:0] W2_BASE    = 14'h1800;
+localparam logic [ADDR_W-1:0] W3_BASE    = 14'h1C00;
+localparam logic [ADDR_W-1:0] W4_BASE    = 14'h2000;
 localparam logic [ADDR_W-1:0] BUF0_BASE  = 14'h2700;
 localparam logic [ADDR_W-1:0] BUF1_BASE  = 14'h2780;
 localparam logic [ADDR_W-1:0] FINAL_BASE = 14'h2880;
@@ -29,6 +29,12 @@ localparam logic [SCALE_W-1:0] M1_Q24 = 32'd6073;
 localparam logic [SCALE_W-1:0] M2_Q24 = 32'd24139;
 localparam logic [SCALE_W-1:0] M3_Q24 = 32'd328223;
 localparam logic [SCALE_W-1:0] M4_Q24 = 32'd16777216;
+
+localparam string INPUT_BIN_PATH = "C:/Users/super/Workspace/Embedded_System_Lab/numpy_reference/weights/input_spectrogram.bin";
+localparam string W1_BIN_PATH    = "C:/Users/super/Workspace/Embedded_System_Lab/numpy_reference/weights/layer1_weights.bin";
+localparam string W2_BIN_PATH    = "C:/Users/super/Workspace/Embedded_System_Lab/numpy_reference/weights/layer2_weights.bin";
+localparam string W3_BIN_PATH    = "C:/Users/super/Workspace/Embedded_System_Lab/numpy_reference/weights/layer3_weights.bin";
+localparam string W4_BIN_PATH    = "C:/Users/super/Workspace/Embedded_System_Lab/numpy_reference/weights/layer4_weights.bin";
 
 logic clk;
 logic rst_n;
@@ -69,6 +75,31 @@ logic signed [ACC_W-1:0]  Y4 [0:N-1][0:OUT_DIM-1];
 logic signed [DATA_W-1:0] X4 [0:N-1][0:OUT_DIM-1];
 
 logic [WORD_W-1:0] expected_final_word [0:OUT_DIM-1];
+
+byte signed x0_bin [0:N*IN_DIM-1];
+byte signed w1_bin [0:H_DIM*IN_DIM-1];
+byte signed w2_bin [0:H_DIM*H_DIM-1];
+byte signed w3_bin [0:H_DIM*H_DIM-1];
+byte signed w4_bin [0:OUT_DIM*H_DIM-1];
+
+localparam logic signed [DATA_W-1:0] expected_numpy [0:N-1][0:OUT_DIM-1] = '{
+    '{8'sd1,  8'sd1,  8'sd1,  8'sd1,  8'sd3,  8'sd1,  8'sd3,  8'sd1,  8'sd3,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd9,  8'sd2,  8'sd1,  8'sd0,  8'sd11, 8'sd0,  8'sd9,  8'sd0,  8'sd20, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd2,  8'sd0,  8'sd0,  8'sd6,  8'sd18, 8'sd0,  8'sd0,  8'sd0,  8'sd8,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd0,  8'sd2,  8'sd2,  8'sd0,  8'sd0,  8'sd4,  8'sd4,  8'sd0,  8'sd0,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd0,  8'sd8,  8'sd15, 8'sd0,  8'sd0,  8'sd8,  8'sd0,  8'sd27, 8'sd7,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd0,  8'sd12, 8'sd4,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd6,  8'sd1,  8'sd0,  8'sd0,  8'sd6,  8'sd0,  8'sd4,  8'sd0,  8'sd11, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd0,  8'sd0,  8'sd9,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd0,  8'sd0,  8'sd0,  8'sd1,  8'sd6,  8'sd0,  8'sd2,  8'sd0,  8'sd0,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd11, 8'sd1,  8'sd0,  8'sd0,  8'sd9,  8'sd0,  8'sd5,  8'sd0,  8'sd19, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd7,  8'sd0,  8'sd7,  8'sd7,  8'sd21, 8'sd3,  8'sd9,  8'sd7,  8'sd17, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd0,  8'sd4,  8'sd5,  8'sd0,  8'sd0,  8'sd4,  8'sd0,  8'sd21, 8'sd1,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd0,  8'sd8,  8'sd5,  8'sd0,  8'sd0,  8'sd1,  8'sd1,  8'sd2,  8'sd1,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd16, 8'sd0,  8'sd0,  8'sd0,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd7,  8'sd1,  8'sd0,  8'sd0,  8'sd7,  8'sd0,  8'sd5,  8'sd0,  8'sd14, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0}
+};
 
 wire [1:0] seq_layer_idx;
 wire       seq_busy;
@@ -168,65 +199,92 @@ end
 endfunction
 
 task automatic init_matrices();
-    int signed value;
+    int fd;
+    int nread;
 begin
+    fd = $fopen(INPUT_BIN_PATH, "rb");
+    if (fd == 0) begin
+        $display("INPUT_BIN_OPEN_FAILED: %s", INPUT_BIN_PATH);
+        $fatal(1);
+    end
+    nread = $fread(x0_bin, fd);
+    $fclose(fd);
+    if (nread != N*IN_DIM) begin
+        $display("INPUT_BIN_SIZE_MISMATCH: expected %0d bytes, got %0d", N*IN_DIM, nread);
+        $fatal(1);
+    end
+
+    fd = $fopen(W1_BIN_PATH, "rb");
+    if (fd == 0) begin
+        $display("W1_BIN_OPEN_FAILED: %s", W1_BIN_PATH);
+        $fatal(1);
+    end
+    nread = $fread(w1_bin, fd);
+    $fclose(fd);
+    if (nread != H_DIM*IN_DIM) begin
+        $display("W1_BIN_SIZE_MISMATCH: expected %0d bytes, got %0d", H_DIM*IN_DIM, nread);
+        $fatal(1);
+    end
+
+    fd = $fopen(W2_BIN_PATH, "rb");
+    if (fd == 0) begin
+        $display("W2_BIN_OPEN_FAILED: %s", W2_BIN_PATH);
+        $fatal(1);
+    end
+    nread = $fread(w2_bin, fd);
+    $fclose(fd);
+    if (nread != H_DIM*H_DIM) begin
+        $display("W2_BIN_SIZE_MISMATCH: expected %0d bytes, got %0d", H_DIM*H_DIM, nread);
+        $fatal(1);
+    end
+
+    fd = $fopen(W3_BIN_PATH, "rb");
+    if (fd == 0) begin
+        $display("W3_BIN_OPEN_FAILED: %s", W3_BIN_PATH);
+        $fatal(1);
+    end
+    nread = $fread(w3_bin, fd);
+    $fclose(fd);
+    if (nread != H_DIM*H_DIM) begin
+        $display("W3_BIN_SIZE_MISMATCH: expected %0d bytes, got %0d", H_DIM*H_DIM, nread);
+        $fatal(1);
+    end
+
+    fd = $fopen(W4_BIN_PATH, "rb");
+    if (fd == 0) begin
+        $display("W4_BIN_OPEN_FAILED: %s", W4_BIN_PATH);
+        $fatal(1);
+    end
+    nread = $fread(w4_bin, fd);
+    $fclose(fd);
+    if (nread != OUT_DIM*H_DIM) begin
+        $display("W4_BIN_SIZE_MISMATCH: expected %0d bytes, got %0d", OUT_DIM*H_DIM, nread);
+        $fatal(1);
+    end
+
     for (int row = 0; row < N; row++) begin
         for (int k = 0; k < IN_DIM; k++) begin
-            value = ((row * 5 + k * 3 + 2) % 9) - 4;
-            X0[row][k] = to_data(value);
+            X0[row][k] = x0_bin[row*IN_DIM + k];
         end
     end
 
     for (int k = 0; k < IN_DIM; k++) begin
         for (int col = 0; col < H_DIM; col++) begin
-            value = ((k * 7 + col * 2 + 1) % 9) - 4;
-            W1[k][col] = to_data(value);
+            W1[k][col] = w1_bin[col*IN_DIM + k];
         end
     end
 
     for (int k = 0; k < H_DIM; k++) begin
         for (int col = 0; col < H_DIM; col++) begin
-            value = ((k * 5 + col * 3 + 4) % 9) - 4;
-            W2[k][col] = to_data(value);
-            value = ((k * 3 + col * 4 + 5) % 9) - 4;
-            W3[k][col] = to_data(value);
+            W2[k][col] = w2_bin[col*H_DIM + k];
+            W3[k][col] = w3_bin[col*H_DIM + k];
         end
     end
 
     for (int k = 0; k < H_DIM; k++) begin
         for (int col = 0; col < OUT_DIM; col++) begin
-            value = ((k * 7 + col * 5 + 6) % 9) - 4;
-            W4[k][col] = to_data(value);
+            W4[k][col] = w4_bin[col*H_DIM + k];
         end
-    end
-
-    // Landmarks with nonzero positive paths after all scales.
-    for (int k = 0; k < IN_DIM; k++) begin
-        X0[0][k] = 8'sd4;
-        X0[1][k] = -8'sd4;
-        X0[2][k] = 8'sd0;
-        for (int col = 0; col < H_DIM; col += N) begin
-            W1[k][col + 0] = 8'sd4;
-            W1[k][col + 1] = 8'sd4;
-            W1[k][col + 2] = 8'sd0;
-        end
-    end
-
-    for (int k = 0; k < H_DIM; k++) begin
-        for (int col = 0; col < H_DIM; col += N) begin
-            W2[k][col + 0] = 8'sd4;
-            W2[k][col + 1] = -8'sd4;
-            W2[k][col + 2] = 8'sd0;
-            W3[k][col + 0] = 8'sd4;
-            W3[k][col + 1] = 8'sd4;
-            W3[k][col + 2] = 8'sd0;
-        end
-    end
-
-    for (int k = 0; k < H_DIM; k++) begin
-        W4[k][0] = 8'sd4;
-        W4[k][1] = -8'sd4;
-        W4[k][2] = 8'sd0;
     end
 end
 endtask
@@ -282,68 +340,22 @@ begin
 end
 endtask
 
-task automatic init_dut_bram();
-    logic [WORD_W-1:0] word;
-    int full_k;
+task automatic pack_expected_final_word_from_numpy();
 begin
-    for (int k = 0; k < IN_DIM; k++) begin
-        word = '0;
+    for (int feature = 0; feature < OUT_DIM; feature++) begin
+        expected_final_word[feature] = '0;
         for (int row = 0; row < N; row++) begin
-            word[DATA_W*row +: DATA_W] = X0[row][k];
-        end
-        u_dut.u_bram.mem[INPUT_BASE + k] = word;
-    end
-
-    for (int ot = 0; ot < 8; ot++) begin
-        for (int kt = 0; kt < 48; kt++) begin
-            for (int t = 0; t < N; t++) begin
-                full_k = kt * N + t;
-                word = '0;
-                for (int col = 0; col < N; col++) begin
-                    word[DATA_W*col +: DATA_W] = W1[full_k][ot*N + col];
-                end
-                u_dut.u_bram.mem[W1_BASE + ot*(48*N) + kt*N + t] = word;
-            end
+            expected_final_word[feature][DATA_W*row +: DATA_W] = expected_numpy[row][feature];
+            X4[row][feature] = expected_numpy[row][feature];
         end
     end
+end
+endtask
 
-    for (int ot = 0; ot < 8; ot++) begin
-        for (int kt = 0; kt < 8; kt++) begin
-            for (int t = 0; t < N; t++) begin
-                full_k = kt * N + t;
-                word = '0;
-                for (int col = 0; col < N; col++) begin
-                    word[DATA_W*col +: DATA_W] = W2[full_k][ot*N + col];
-                end
-                u_dut.u_bram.mem[W2_BASE + ot*(8*N) + kt*N + t] = word;
-            end
-        end
-    end
-
-    for (int ot = 0; ot < 8; ot++) begin
-        for (int kt = 0; kt < 8; kt++) begin
-            for (int t = 0; t < N; t++) begin
-                full_k = kt * N + t;
-                word = '0;
-                for (int col = 0; col < N; col++) begin
-                    word[DATA_W*col +: DATA_W] = W3[full_k][ot*N + col];
-                end
-                u_dut.u_bram.mem[W3_BASE + ot*(8*N) + kt*N + t] = word;
-            end
-        end
-    end
-
-    for (int kt = 0; kt < 8; kt++) begin
-        for (int t = 0; t < N; t++) begin
-            full_k = kt * N + t;
-            word = '0;
-            for (int col = 0; col < OUT_DIM; col++) begin
-                word[DATA_W*col +: DATA_W] = W4[full_k][col];
-            end
-            u_dut.u_bram.mem[W4_BASE + kt*N + t] = word;
-        end
-    end
-
+task automatic init_dut_bram();
+begin
+    // BRAM_TDP already loads the provided bram_init.txt via $readmemh.
+    // Do not overwrite input/weight regions here; only clear output scratch.
     for (int offset = 0; offset < H_DIM; offset++) begin
         u_dut.u_bram.mem[BUF0_BASE + offset] = '0;
         u_dut.u_bram.mem[BUF1_BASE + offset] = '0;
@@ -412,11 +424,15 @@ endtask
 
 task automatic check_final_memory();
     logic [WORD_W-1:0] got_word;
+    int mismatch_count;
 begin
+    mismatch_count = 0;
+
     for (int feature = 0; feature < OUT_DIM; feature++) begin
         got_word = u_dut.u_bram.mem[FINAL_BASE + feature];
 
         if (got_word !== expected_final_word[feature]) begin
+            mismatch_count++;
             $display("FINAL_MEMORY_CHECK feature %0d: expected word 0x%032h, got 0x%032h",
                      feature, expected_final_word[feature], got_word);
             for (int row = 0; row < N; row++) begin
@@ -424,8 +440,90 @@ begin
                          row, X4[row][feature],
                          $signed(got_word[DATA_W*row +: DATA_W]));
             end
-            $fatal(1);
         end
+    end
+
+    if (mismatch_count != 0) begin
+        $display("FINAL_MEMORY_CHECK_FAILED mismatch_count=%0d", mismatch_count);
+        $fatal(1);
+    end
+end
+endtask
+
+task automatic check_numpy_reference_output();
+    logic signed [DATA_W-1:0] got_value;
+    int mismatch_count;
+begin
+    mismatch_count = 0;
+
+    for (int row = 0; row < N; row++) begin
+        for (int feature = 0; feature < OUT_DIM; feature++) begin
+            got_value = $signed(u_dut.u_bram.mem[FINAL_BASE + feature][DATA_W*row +: DATA_W]);
+
+            if (got_value !== expected_numpy[row][feature]) begin
+                mismatch_count++;
+                $display("NUMPY_REFERENCE_OUTPUT_MISMATCH row=%0d feature=%0d expected=%0d got=%0d",
+                         row, feature, expected_numpy[row][feature], got_value);
+            end
+        end
+    end
+
+    if (mismatch_count != 0) begin
+        $display("NUMPY_REFERENCE_OUTPUT_FAILED mismatch_count=%0d", mismatch_count);
+        $fatal(1);
+    end
+
+    $display("NUMPY_REFERENCE_OUTPUT_MATCHED");
+end
+endtask
+
+task automatic print_final_matrix();
+    logic signed [DATA_W-1:0] final_value;
+    int signed current_value;
+    int signed best_value;
+    int        best_feature;
+begin
+    $display("=== RTL FINAL OUTPUT MATRIX ===");
+    for (int row = 0; row < N; row++) begin
+        if (row == 0) begin
+            $write("[[");
+        end
+        else begin
+            $write(" [");
+        end
+
+        for (int feature = 0; feature < OUT_DIM; feature++) begin
+            final_value = $signed(u_dut.u_bram.mem[FINAL_BASE + feature][DATA_W*row +: DATA_W]);
+            $write("%4d", final_value);
+            if (feature != OUT_DIM-1) begin
+                $write(" ");
+            end
+        end
+
+        if (row == N-1) begin
+            $display("]]");
+        end
+        else begin
+            $display("]");
+        end
+    end
+
+    $display("--- RTL Final Batch Predictions ---");
+    for (int row = 0; row < N; row++) begin
+        best_feature = 0;
+        best_value   = -129;
+
+        for (int feature = 0; feature < 9; feature++) begin
+            final_value = $signed(u_dut.u_bram.mem[FINAL_BASE + feature][DATA_W*row +: DATA_W]);
+            current_value = final_value;
+
+            if ((feature == 0) || (current_value > best_value)) begin
+                best_value   = current_value;
+                best_feature = feature;
+            end
+        end
+
+        $display("Audio Clip %02d: Predicted Class ID = %0d", row + 1, best_feature);
     end
 end
 endtask
@@ -445,6 +543,7 @@ initial begin
 
     init_matrices();
     compute_golden();
+    pack_expected_final_word_from_numpy();
 
     #1;
     init_dut_bram();
@@ -459,6 +558,8 @@ initial begin
     repeat (4) @(posedge clk);
     #1;
     check_final_memory();
+    check_numpy_reference_output();
+    print_final_matrix();
 
     $display("FINALPRJ_TOP 4LAYER MLP test PASSED");
     repeat (4) @(posedge clk);

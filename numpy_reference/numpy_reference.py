@@ -1,6 +1,9 @@
 import numpy as np
 import os
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+WEIGHTS_DIR = os.path.join(BASE_DIR, "weights")
+
 M1 = 0.00036199
 M2 = 0.00143881
 M3 = 0.01956364
@@ -33,11 +36,11 @@ def load_raw_binary(filepath, shape):
     return np.fromfile(filepath, dtype=np.int8).reshape(shape)
 
 if __name__ == "__main__":
-    X_int8 = load_raw_binary("./weights/input_spectrogram.bin", (16, 768))
-    W1_int8 = load_raw_binary("./weights/layer1_weights.bin", (128, 768))
-    W2_int8 = load_raw_binary("./weights/layer2_weights.bin", (128, 128))
-    W3_int8 = load_raw_binary("./weights/layer3_weights.bin", (128, 128))
-    W4_int8 = load_raw_binary("./weights/layer4_weights.bin", (16, 128))
+    X_int8 = load_raw_binary(os.path.join(WEIGHTS_DIR, "input_spectrogram.bin"), (16, 768))
+    W1_int8 = load_raw_binary(os.path.join(WEIGHTS_DIR, "layer1_weights.bin"), (128, 768))
+    W2_int8 = load_raw_binary(os.path.join(WEIGHTS_DIR, "layer2_weights.bin"), (128, 128))
+    W3_int8 = load_raw_binary(os.path.join(WEIGHTS_DIR, "layer3_weights.bin"), (128, 128))
+    W4_int8 = load_raw_binary(os.path.join(WEIGHTS_DIR, "layer4_weights.bin"), (16, 128))
 
     print("Data loaded. Executing Static Hardware Pipeline...\n")
 

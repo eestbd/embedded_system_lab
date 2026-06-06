@@ -19,6 +19,7 @@ module output_tile_engine_feature_major_16x16 #(
     input  logic [ADDR_W-1:0]            act_base_addr,
     input  logic [ADDR_W-1:0]            wgt_base_addr,
     input  logic [ADDR_W-1:0]            out_base_addr,
+    input  logic                         act_layout_row_major,
 
     input  logic [ADDR_W-1:0]            act_k_stride,
     input  logic [ADDR_W-1:0]            wgt_k_stride,
@@ -66,9 +67,13 @@ typedef enum logic [3:0] {
 state_t state;
 
 logic reader_start;
+logic act_reader_raw_valid;
+logic act_reader_busy;
+logic act_reader_done;
+logic wgt_reader_raw_valid;
+logic wgt_reader_busy;
+logic wgt_reader_done;
 logic reader_raw_valid;
-logic reader_busy;
-logic reader_done;
 
 logic signed [DATA_W-1:0] reader_raw_act_vec [0:N-1];
 logic signed [DATA_W-1:0] reader_raw_wgt_vec [0:N-1];
@@ -89,6 +94,7 @@ logic drain_start;
 logic drain_row_valid;
 logic [ROW_W-1:0] drain_row_idx;
 logic [ROW_W-1:0] drain_row_idx_d1;
+logic [ROW_W-1:0] drain_row_idx_d2;
 logic drain_busy;
 logic drain_done;
 logic signed [ACC_W-1:0] drain_row_vec [0:N-1];
@@ -125,6 +131,7 @@ assign busy = (state != ST_IDLE);
 assign reader_start = en && (state == ST_START_READER);
 assign writer_start = en && (state == ST_START_WRITER);
 assign drain_start  = en && (state == ST_DRAIN_START);
+assign reader_raw_valid = act_reader_raw_valid && wgt_reader_raw_valid;
 
 assign component_clear = clear || (en && (state == ST_CLEAR_ARRAY));
 assign datapath_en     = en && ((state == ST_CLEAR_ARRAY) ||
@@ -153,30 +160,47 @@ generate
     end
 endgenerate
 
-bram_stream_reader_16x16 #(
+bram_activation_reader_16x16 #(
     .N     (N),
     .DATA_W(DATA_W),
     .WORD_W(WORD_W),
     .ADDR_W(ADDR_W)
-) reader (
+) act_reader (
     .clk           (clk),
     .rst           (rst),
     .clear         (component_clear),
     .start         (reader_start),
     .en            (en),
+    .row_major_layout(act_layout_row_major),
     .act_base_addr (current_act_base),
-    .wgt_base_addr (current_wgt_base),
     .bram_act_en   (bram_act_en),
     .bram_act_addr (bram_act_addr),
     .bram_act_rdata(bram_act_rdata),
+    .raw_valid     (act_reader_raw_valid),
+    .raw_act_vec   (reader_raw_act_vec),
+    .busy          (act_reader_busy),
+    .done          (act_reader_done)
+);
+
+bram_weight_reader_16x16 #(
+    .N     (N),
+    .DATA_W(DATA_W),
+    .WORD_W(WORD_W),
+    .ADDR_W(ADDR_W)
+) wgt_reader (
+    .clk           (clk),
+    .rst           (rst),
+    .clear         (component_clear),
+    .start         (reader_start),
+    .en            (en),
+    .wgt_base_addr (current_wgt_base),
     .bram_wgt_en   (bram_wgt_en),
     .bram_wgt_addr (bram_wgt_addr),
     .bram_wgt_rdata(bram_wgt_rdata),
-    .raw_valid     (reader_raw_valid),
-    .raw_act_vec   (reader_raw_act_vec),
+    .raw_valid     (wgt_reader_raw_valid),
     .raw_wgt_vec   (reader_raw_wgt_vec),
-    .busy          (reader_busy),
-    .done          (reader_done)
+    .busy          (wgt_reader_busy),
+    .done          (wgt_reader_done)
 );
 
 skewer_16 #(
@@ -267,7 +291,7 @@ bram_output_writer_feature_major_16x16 #(
     .start        (writer_start),
     .out_base_addr(out_base_addr),
     .in_valid     (post_out_valid),
-    .in_row_idx   (drain_row_idx_d1),
+    .in_row_idx   (drain_row_idx_d2),
     .in_vec       (post_out_vec),
     .bram_wr      (bram_out_wr),
     .bram_addr    (bram_out_addr),
@@ -285,6 +309,7 @@ always_ff @(posedge clk) begin
         clear_count        <= '0;
         flush_count        <= '0;
         drain_row_idx_d1   <= '0;
+        drain_row_idx_d2   <= '0;
         done               <= 1'b0;
         for (int stream = 0; stream < N; stream++) begin
             for (int lane = 0; lane < N; lane++) begin
@@ -296,6 +321,7 @@ always_ff @(posedge clk) begin
     else if (en) begin
         done <= 1'b0;
         drain_row_idx_d1 <= drain_row_idx;
+        drain_row_idx_d2 <= drain_row_idx_d1;
 
         case (state)
             ST_IDLE: begin
@@ -305,6 +331,7 @@ always_ff @(posedge clk) begin
                 clear_count        <= '0;
                 flush_count        <= '0;
                 drain_row_idx_d1   <= '0;
+                drain_row_idx_d2   <= '0;
 
                 if (start) begin
                     // Clear PE accumulators once per output tile. K tile
@@ -318,6 +345,7 @@ always_ff @(posedge clk) begin
                 feed_count         <= '0;
                 flush_count        <= '0;
                 drain_row_idx_d1   <= '0;
+                drain_row_idx_d2   <= '0;
 
                 if (clear_count == CLEAR_CYCLES-1) begin
                     clear_count <= '0;
@@ -390,6 +418,7 @@ always_ff @(posedge clk) begin
                 clear_count        <= '0;
                 flush_count        <= '0;
                 drain_row_idx_d1   <= '0;
+                drain_row_idx_d2   <= '0;
                 state              <= ST_START_READER;
             end
 
@@ -429,6 +458,7 @@ always_ff @(posedge clk) begin
                 clear_count        <= '0;
                 flush_count        <= '0;
                 drain_row_idx_d1   <= '0;
+                drain_row_idx_d2   <= '0;
                 done               <= 1'b0;
             end
         endcase

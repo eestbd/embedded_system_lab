@@ -99,6 +99,7 @@ single_layer_engine_feature_major_16x16 #(
     .act_base_addr  (act_base_addr),
     .wgt_base_addr  (wgt_base_addr),
     .out_base_addr  (out_base_addr),
+    .act_layout_row_major(1'b0),
     .act_k_stride   (act_k_stride),
     .wgt_k_stride   (wgt_k_stride),
     .wgt_out_stride (wgt_out_stride),
