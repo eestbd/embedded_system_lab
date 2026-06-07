@@ -19,6 +19,7 @@ module single_layer_engine_feature_major_16x16 #(
     input  logic [ADDR_W-1:0]            wgt_base_addr,
     input  logic [ADDR_W-1:0]            out_base_addr,
     input  logic                         act_layout_row_major,
+    input  logic                         out_layout_row_major,
 
     input  logic [ADDR_W-1:0]            act_k_stride,
     input  logic [ADDR_W-1:0]            wgt_k_stride,
@@ -94,6 +95,7 @@ output_tile_engine_feature_major_16x16 #(
     .wgt_base_addr (current_wgt_base),
     .out_base_addr (current_out_base),
     .act_layout_row_major(act_layout_row_major),
+    .out_layout_row_major(out_layout_row_major),
     .act_k_stride  (act_k_stride),
     .wgt_k_stride  (wgt_k_stride),
     .num_k_tiles   (num_k_tiles),

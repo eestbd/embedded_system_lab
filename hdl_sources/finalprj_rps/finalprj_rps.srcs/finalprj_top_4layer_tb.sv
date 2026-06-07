@@ -331,10 +331,10 @@ begin
         end
     end
 
-    for (int feature = 0; feature < OUT_DIM; feature++) begin
-        expected_final_word[feature] = '0;
-        for (int row = 0; row < N; row++) begin
-            expected_final_word[feature][DATA_W*row +: DATA_W] = X4[row][feature];
+    for (int row = 0; row < N; row++) begin
+        expected_final_word[row] = '0;
+        for (int feature = 0; feature < OUT_DIM; feature++) begin
+            expected_final_word[row][DATA_W*feature +: DATA_W] = X4[row][feature];
         end
     end
 end
@@ -342,10 +342,10 @@ endtask
 
 task automatic pack_expected_final_word_from_numpy();
 begin
-    for (int feature = 0; feature < OUT_DIM; feature++) begin
-        expected_final_word[feature] = '0;
-        for (int row = 0; row < N; row++) begin
-            expected_final_word[feature][DATA_W*row +: DATA_W] = expected_numpy[row][feature];
+    for (int row = 0; row < N; row++) begin
+        expected_final_word[row] = '0;
+        for (int feature = 0; feature < OUT_DIM; feature++) begin
+            expected_final_word[row][DATA_W*feature +: DATA_W] = expected_numpy[row][feature];
             X4[row][feature] = expected_numpy[row][feature];
         end
     end
@@ -361,8 +361,8 @@ begin
         u_dut.u_bram.mem[BUF1_BASE + offset] = '0;
     end
 
-    for (int feature = 0; feature < OUT_DIM; feature++) begin
-        u_dut.u_bram.mem[FINAL_BASE + feature] = '0;
+    for (int row = 0; row < N; row++) begin
+        u_dut.u_bram.mem[FINAL_BASE + row] = '0;
     end
 end
 endtask
@@ -428,17 +428,17 @@ task automatic check_final_memory();
 begin
     mismatch_count = 0;
 
-    for (int feature = 0; feature < OUT_DIM; feature++) begin
-        got_word = u_dut.u_bram.mem[FINAL_BASE + feature];
+    for (int row = 0; row < N; row++) begin
+        got_word = u_dut.u_bram.mem[FINAL_BASE + row];
 
-        if (got_word !== expected_final_word[feature]) begin
+        if (got_word !== expected_final_word[row]) begin
             mismatch_count++;
-            $display("FINAL_MEMORY_CHECK feature %0d: expected word 0x%032h, got 0x%032h",
-                     feature, expected_final_word[feature], got_word);
-            for (int row = 0; row < N; row++) begin
-                $display("  row %0d expected=%0d got=%0d",
-                         row, X4[row][feature],
-                         $signed(got_word[DATA_W*row +: DATA_W]));
+            $display("FINAL_MEMORY_CHECK row %0d: expected word 0x%032h, got 0x%032h",
+                     row, expected_final_word[row], got_word);
+            for (int feature = 0; feature < OUT_DIM; feature++) begin
+                $display("  feature %0d expected=%0d got=%0d",
+                         feature, X4[row][feature],
+                         $signed(got_word[DATA_W*feature +: DATA_W]));
             end
         end
     end
@@ -458,7 +458,7 @@ begin
 
     for (int row = 0; row < N; row++) begin
         for (int feature = 0; feature < OUT_DIM; feature++) begin
-            got_value = $signed(u_dut.u_bram.mem[FINAL_BASE + feature][DATA_W*row +: DATA_W]);
+            got_value = $signed(u_dut.u_bram.mem[FINAL_BASE + row][DATA_W*feature +: DATA_W]);
 
             if (got_value !== expected_numpy[row][feature]) begin
                 mismatch_count++;
@@ -493,7 +493,7 @@ begin
         end
 
         for (int feature = 0; feature < OUT_DIM; feature++) begin
-            final_value = $signed(u_dut.u_bram.mem[FINAL_BASE + feature][DATA_W*row +: DATA_W]);
+            final_value = $signed(u_dut.u_bram.mem[FINAL_BASE + row][DATA_W*feature +: DATA_W]);
             $write("%4d", final_value);
             if (feature != OUT_DIM-1) begin
                 $write(" ");
@@ -514,7 +514,7 @@ begin
         best_value   = -129;
 
         for (int feature = 0; feature < 9; feature++) begin
-            final_value = $signed(u_dut.u_bram.mem[FINAL_BASE + feature][DATA_W*row +: DATA_W]);
+            final_value = $signed(u_dut.u_bram.mem[FINAL_BASE + row][DATA_W*feature +: DATA_W]);
             current_value = final_value;
 
             if ((feature == 0) || (current_value > best_value)) begin

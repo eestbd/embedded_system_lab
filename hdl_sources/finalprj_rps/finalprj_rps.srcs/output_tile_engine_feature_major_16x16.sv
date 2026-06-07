@@ -20,6 +20,7 @@ module output_tile_engine_feature_major_16x16 #(
     input  logic [ADDR_W-1:0]            wgt_base_addr,
     input  logic [ADDR_W-1:0]            out_base_addr,
     input  logic                         act_layout_row_major,
+    input  logic                         out_layout_row_major,
 
     input  logic [ADDR_W-1:0]            act_k_stride,
     input  logic [ADDR_W-1:0]            wgt_k_stride,
@@ -105,6 +106,18 @@ logic signed [DATA_W-1:0] post_out_vec [0:N-1];
 logic writer_start;
 logic writer_busy;
 logic writer_done;
+logic writer_feature_start;
+logic writer_feature_busy;
+logic writer_feature_done;
+logic writer_feature_bram_wr;
+logic [ADDR_W-1:0] writer_feature_bram_addr;
+logic [WORD_W-1:0] writer_feature_bram_wdata;
+logic writer_row_start;
+logic writer_row_busy;
+logic writer_row_done;
+logic writer_row_bram_wr;
+logic [ADDR_W-1:0] writer_row_bram_addr;
+logic [WORD_W-1:0] writer_row_bram_wdata;
 
 logic [K_TILES_W-1:0] k_tile_idx;
 logic [K_TILES_W-1:0] num_k_tiles_m1;
@@ -130,8 +143,15 @@ assign busy = (state != ST_IDLE);
 
 assign reader_start = en && (state == ST_START_READER);
 assign writer_start = en && (state == ST_START_WRITER);
+assign writer_feature_start = writer_start && !out_layout_row_major;
+assign writer_row_start = writer_start && out_layout_row_major;
 assign drain_start  = en && (state == ST_DRAIN_START);
 assign reader_raw_valid = act_reader_raw_valid && wgt_reader_raw_valid;
+assign writer_busy = out_layout_row_major ? writer_row_busy : writer_feature_busy;
+assign writer_done = out_layout_row_major ? writer_row_done : writer_feature_done;
+assign bram_out_wr = out_layout_row_major ? writer_row_bram_wr : writer_feature_bram_wr;
+assign bram_out_addr = out_layout_row_major ? writer_row_bram_addr : writer_feature_bram_addr;
+assign bram_out_wdata = out_layout_row_major ? writer_row_bram_wdata : writer_feature_bram_wdata;
 
 assign component_clear = clear || (en && (state == ST_CLEAR_ARRAY));
 assign datapath_en     = en && ((state == ST_CLEAR_ARRAY) ||
@@ -283,21 +303,43 @@ bram_output_writer_feature_major_16x16 #(
     .DATA_W(DATA_W),
     .WORD_W(WORD_W),
     .ADDR_W(ADDR_W)
-) writer (
+) feature_writer (
     .clk          (clk),
     .rst          (rst),
     .clear        (component_clear),
     .en           (en),
-    .start        (writer_start),
+    .start        (writer_feature_start),
     .out_base_addr(out_base_addr),
     .in_valid     (post_out_valid),
     .in_row_idx   (drain_row_idx_d2),
     .in_vec       (post_out_vec),
-    .bram_wr      (bram_out_wr),
-    .bram_addr    (bram_out_addr),
-    .bram_wdata   (bram_out_wdata),
-    .busy         (writer_busy),
-    .done         (writer_done)
+    .bram_wr      (writer_feature_bram_wr),
+    .bram_addr    (writer_feature_bram_addr),
+    .bram_wdata   (writer_feature_bram_wdata),
+    .busy         (writer_feature_busy),
+    .done         (writer_feature_done)
+);
+
+bram_output_writer_16x16 #(
+    .N     (N),
+    .DATA_W(DATA_W),
+    .WORD_W(WORD_W),
+    .ADDR_W(ADDR_W)
+) row_writer (
+    .clk          (clk),
+    .rst          (rst),
+    .clear        (component_clear),
+    .en           (en),
+    .start        (writer_row_start),
+    .out_base_addr(out_base_addr),
+    .in_valid     (post_out_valid),
+    .in_row_idx   (drain_row_idx_d2),
+    .in_vec       (post_out_vec),
+    .bram_wr      (writer_row_bram_wr),
+    .bram_addr    (writer_row_bram_addr),
+    .bram_wdata   (writer_row_bram_wdata),
+    .busy         (writer_row_busy),
+    .done         (writer_row_done)
 );
 
 always_ff @(posedge clk) begin

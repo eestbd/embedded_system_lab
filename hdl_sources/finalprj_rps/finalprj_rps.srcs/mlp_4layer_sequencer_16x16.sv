@@ -68,6 +68,7 @@ logic [ADDR_W-1:0] current_wgt_base;
 logic [ADDR_W-1:0] current_out_base;
 logic [ADDR_W-1:0] current_wgt_out_stride;
 logic              current_act_layout_row_major;
+logic              current_out_layout_row_major;
 logic [K_TILES_W-1:0] current_num_k_tiles;
 logic [OUT_TILES_W-1:0] current_num_out_tiles;
 logic [SCALE_W-1:0] current_scale_q;
@@ -81,6 +82,7 @@ always_comb begin
     current_out_base       = SCRATCH0_BASE;
     current_wgt_out_stride = 14'd768;
     current_act_layout_row_major = 1'b1;
+    current_out_layout_row_major = 1'b0;
     current_num_k_tiles    = 8'd48;
     current_num_out_tiles  = 8'd8;
     current_scale_q        = M1_Q24;
@@ -92,6 +94,7 @@ always_comb begin
             current_out_base       = SCRATCH0_BASE;
             current_wgt_out_stride = 14'd768; // 48 K tiles * 16 words
             current_act_layout_row_major = 1'b1; // input_spectrogram.bin is bram_init pre-tiled row-major
+            current_out_layout_row_major = 1'b0;
             current_num_k_tiles    = 8'd48;
             current_num_out_tiles  = 8'd8;
             current_scale_q        = M1_Q24;
@@ -103,6 +106,7 @@ always_comb begin
             current_out_base       = SCRATCH1_BASE;
             current_wgt_out_stride = 14'd128; // 8 K tiles * 16 words
             current_act_layout_row_major = 1'b0; // intermediate activations are feature-major
+            current_out_layout_row_major = 1'b0;
             current_num_k_tiles    = 8'd8;
             current_num_out_tiles  = 8'd8;
             current_scale_q        = M2_Q24;
@@ -114,6 +118,7 @@ always_comb begin
             current_out_base       = SCRATCH0_BASE;
             current_wgt_out_stride = 14'd128;
             current_act_layout_row_major = 1'b0;
+            current_out_layout_row_major = 1'b0;
             current_num_k_tiles    = 8'd8;
             current_num_out_tiles  = 8'd8;
             current_scale_q        = M3_Q24;
@@ -125,6 +130,7 @@ always_comb begin
             current_out_base       = FINAL_BASE;
             current_wgt_out_stride = 14'd128;
             current_act_layout_row_major = 1'b0;
+            current_out_layout_row_major = 1'b1; // final BRAM output is row-major for PS/Vitis.
             current_num_k_tiles    = 8'd8;
             current_num_out_tiles  = 8'd1;
             current_scale_q        = M4_Q24;
@@ -152,6 +158,7 @@ single_layer_engine_feature_major_16x16 #(
     .wgt_base_addr  (current_wgt_base),
     .out_base_addr  (current_out_base),
     .act_layout_row_major(current_act_layout_row_major),
+    .out_layout_row_major(current_out_layout_row_major),
     .act_k_stride   (TILE_STRIDE),
     .wgt_k_stride   (TILE_STRIDE),
     .wgt_out_stride (current_wgt_out_stride),

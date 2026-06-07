@@ -5,7 +5,8 @@
 - One line is one 128-bit BRAM word, or 16 bytes.
 - The hex line is byte-reversed for `$readmemh`; in RTL, `mem[word][8*lane +: 8]` reads lane 0 from the LSB byte.
 - Input and weight sections are stored as 16x16 pre-tiled row-major tiles.
-- Intermediate and final activations are written feature-major: one BRAM word per feature, with lanes 0..15 holding batch rows 0..15.
+- Intermediate activations are written feature-major: one BRAM word per feature, with lanes 0..15 holding batch rows 0..15.
+- Final output is written row-major for PS/Vitis: one BRAM word per audio clip, with lanes 0..15 holding output columns 0..15.
 
 ## bram_init.txt memory map
 
@@ -18,7 +19,7 @@
 | input_spectrogram.bin | `14'h2400` to `14'h26FF` |
 | scratch0 activations | `14'h2700` to `14'h277F` |
 | scratch1 activations | `14'h2780` to `14'h27FF` |
-| final output | `14'h2880` to `14'h288F` |
+| final output, row-major | `14'h2880` to `14'h288F` |
 
 ## RTL address map
 
@@ -37,7 +38,8 @@
 - The same activation reader reads L2-L4 intermediate activations with `row_major_layout=1'b0`, matching the feature-major words produced by `bram_output_writer_feature_major_16x16.sv`.
 - `bram_weight_reader_16x16.sv` reads pre-tiled row-major weight tiles and emits raw weight lanes as `W[out_feature][k_inner]`, matching the existing systolic array input convention.
 - `output_tile_engine_feature_major_16x16.sv` now uses separate activation and weight readers, so Port A follows activation/output traffic and Port B follows weight traffic.
-- `bram_output_writer_feature_major_16x16.sv` still writes one feature word with row lanes, which is compatible with the next layer activation reader in feature-major mode.
+- `bram_output_writer_feature_major_16x16.sv` writes intermediate layer words in feature-major layout, which is compatible with the next layer activation reader in feature-major mode.
+- The L4 final output selects `bram_output_writer_16x16.sv`, so PS/Vitis can read the result as a row-major 16x16 byte matrix starting at byte offset `0x28800`.
 
 ## Check result
 
