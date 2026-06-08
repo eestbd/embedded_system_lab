@@ -47,7 +47,9 @@ module output_tile_engine_feature_major_16x16 #(
 localparam int ROW_W       = (N <= 1) ? 1 : $clog2(N);
 localparam int COUNT_W     = (N <= 1) ? 1 : $clog2(N + 1);
 localparam int CLEAR_CNT_W = (CLEAR_CYCLES <= 1) ? 1 : $clog2(CLEAR_CYCLES);
-localparam int FLUSH_CNT_W = (FLUSH_CYCLES <= 1) ? 1 : $clog2(FLUSH_CYCLES);
+localparam int STREAM_STAGE_CYCLES = 1;
+localparam int EFFECTIVE_FLUSH_CYCLES = FLUSH_CYCLES + STREAM_STAGE_CYCLES;
+localparam int FLUSH_CNT_W = (EFFECTIVE_FLUSH_CYCLES <= 1) ? 1 : $clog2(EFFECTIVE_FLUSH_CYCLES);
 localparam int OFFSET_W    = ADDR_W + K_TILES_W;
 
 typedef enum logic [3:0] {
@@ -82,6 +84,8 @@ logic signed [DATA_W-1:0] reader_raw_wgt_vec [0:N-1];
 logic signed [DATA_W-1:0] act_buf [0:N-1][0:N-1];
 logic signed [DATA_W-1:0] wgt_buf [0:N-1][0:N-1];
 
+logic signed [DATA_W-1:0] stream_act_vec [0:N-1];
+logic signed [DATA_W-1:0] stream_wgt_vec [0:N-1];
 logic signed [DATA_W-1:0] raw_act_vec [0:N-1];
 logic signed [DATA_W-1:0] raw_wgt_vec [0:N-1];
 logic signed [DATA_W-1:0] act_vec_skewed [0:N-1];
@@ -173,12 +177,27 @@ assign current_wgt_base = wgt_base_addr + wgt_k_offset[ADDR_W-1:0];
 generate
     genvar g_lane;
     for (g_lane = 0; g_lane < N; g_lane++) begin : g_stream_mux
-        assign raw_act_vec[g_lane] =
+        assign stream_act_vec[g_lane] =
             (state == ST_STREAM_TO_ARRAY) ? act_buf[feed_index][g_lane] : '0;
-        assign raw_wgt_vec[g_lane] =
+        assign stream_wgt_vec[g_lane] =
             (state == ST_STREAM_TO_ARRAY) ? wgt_buf[feed_index][g_lane] : '0;
     end
 endgenerate
+
+always_ff @(posedge clk) begin
+    if (rst || clear) begin
+        for (int lane = 0; lane < N; lane++) begin
+            raw_act_vec[lane] <= '0;
+            raw_wgt_vec[lane] <= '0;
+        end
+    end
+    else if (datapath_en) begin
+        for (int lane = 0; lane < N; lane++) begin
+            raw_act_vec[lane] <= stream_act_vec[lane];
+            raw_wgt_vec[lane] <= stream_wgt_vec[lane];
+        end
+    end
+end
 
 bram_activation_reader_16x16 #(
     .N     (N),
@@ -437,7 +456,7 @@ always_ff @(posedge clk) begin
             ST_FLUSH_ARRAY: begin
                 // Push zeros through the systolic pipes so the next K tile
                 // starts with clean forwarding paths while acc_mat is retained.
-                if (flush_count == FLUSH_CYCLES-1) begin
+                if (flush_count == EFFECTIVE_FLUSH_CYCLES-1) begin
                     flush_count <= '0;
                     if (last_k_tile) begin
                         state <= ST_START_WRITER;
