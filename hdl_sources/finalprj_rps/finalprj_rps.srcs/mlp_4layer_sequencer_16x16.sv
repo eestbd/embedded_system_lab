@@ -62,6 +62,7 @@ logic layer_busy;
 logic layer_done;
 
 logic [1:0] layer_idx;
+logic [1:0] load_layer_idx;
 
 logic [ADDR_W-1:0] current_act_base;
 logic [ADDR_W-1:0] current_wgt_base;
@@ -73,8 +74,19 @@ logic [K_TILES_W-1:0] current_num_k_tiles;
 logic [OUT_TILES_W-1:0] current_num_out_tiles;
 logic [SCALE_W-1:0] current_scale_q;
 
+logic [ADDR_W-1:0] active_act_base;
+logic [ADDR_W-1:0] active_wgt_base;
+logic [ADDR_W-1:0] active_out_base;
+logic [ADDR_W-1:0] active_wgt_out_stride;
+logic              active_act_layout_row_major;
+logic              active_out_layout_row_major;
+logic [K_TILES_W-1:0] active_num_k_tiles;
+logic [OUT_TILES_W-1:0] active_num_out_tiles;
+logic [SCALE_W-1:0] active_scale_q;
+
 assign busy = (state != ST_IDLE);
 assign layer_start = en && (state == ST_START_LAYER);
+assign load_layer_idx = (state == ST_NEXT_LAYER) ? (layer_idx + 1'b1) : layer_idx;
 
 always_comb begin
     current_act_base       = INPUT_BASE;
@@ -87,7 +99,7 @@ always_comb begin
     current_num_out_tiles  = 8'd8;
     current_scale_q        = M1_Q24;
 
-    case (layer_idx)
+    case (load_layer_idx)
         2'd0: begin
             current_act_base       = INPUT_BASE;
             current_wgt_base       = W1_BASE;
@@ -154,18 +166,18 @@ single_layer_engine_feature_major_16x16 #(
     .clear          (clear),
     .start          (layer_start),
     .en             (en),
-    .act_base_addr  (current_act_base),
-    .wgt_base_addr  (current_wgt_base),
-    .out_base_addr  (current_out_base),
-    .act_layout_row_major(current_act_layout_row_major),
-    .out_layout_row_major(current_out_layout_row_major),
+    .act_base_addr  (active_act_base),
+    .wgt_base_addr  (active_wgt_base),
+    .out_base_addr  (active_out_base),
+    .act_layout_row_major(active_act_layout_row_major),
+    .out_layout_row_major(active_out_layout_row_major),
     .act_k_stride   (TILE_STRIDE),
     .wgt_k_stride   (TILE_STRIDE),
-    .wgt_out_stride (current_wgt_out_stride),
+    .wgt_out_stride (active_wgt_out_stride),
     .out_tile_stride(TILE_STRIDE),
-    .num_k_tiles    (current_num_k_tiles),
-    .num_out_tiles  (current_num_out_tiles),
-    .scale_q        (current_scale_q),
+    .num_k_tiles    (active_num_k_tiles),
+    .num_out_tiles  (active_num_out_tiles),
+    .scale_q        (active_scale_q),
     .bram_act_en    (bram_act_en),
     .bram_act_addr  (bram_act_addr),
     .bram_act_rdata (bram_act_rdata),
@@ -184,6 +196,15 @@ always_ff @(posedge clk) begin
         state     <= ST_IDLE;
         layer_idx <= '0;
         done      <= 1'b0;
+        active_act_base             <= '0;
+        active_wgt_base             <= '0;
+        active_out_base             <= '0;
+        active_wgt_out_stride       <= '0;
+        active_act_layout_row_major <= 1'b0;
+        active_out_layout_row_major <= 1'b0;
+        active_num_k_tiles          <= '0;
+        active_num_out_tiles        <= '0;
+        active_scale_q              <= '0;
     end
     else if (en) begin
         done <= 1'b0;
@@ -193,7 +214,16 @@ always_ff @(posedge clk) begin
                 layer_idx <= '0;
 
                 if (start) begin
-                    state <= ST_START_LAYER;
+                    active_act_base             <= current_act_base;
+                    active_wgt_base             <= current_wgt_base;
+                    active_out_base             <= current_out_base;
+                    active_wgt_out_stride       <= current_wgt_out_stride;
+                    active_act_layout_row_major <= current_act_layout_row_major;
+                    active_out_layout_row_major <= current_out_layout_row_major;
+                    active_num_k_tiles          <= current_num_k_tiles;
+                    active_num_out_tiles        <= current_num_out_tiles;
+                    active_scale_q              <= current_scale_q;
+                    state                       <= ST_START_LAYER;
                 end
             end
 
@@ -214,8 +244,17 @@ always_ff @(posedge clk) begin
             end
 
             ST_NEXT_LAYER: begin
-                layer_idx <= layer_idx + 1'b1;
-                state     <= ST_START_LAYER;
+                layer_idx                   <= layer_idx + 1'b1;
+                active_act_base             <= current_act_base;
+                active_wgt_base             <= current_wgt_base;
+                active_out_base             <= current_out_base;
+                active_wgt_out_stride       <= current_wgt_out_stride;
+                active_act_layout_row_major <= current_act_layout_row_major;
+                active_out_layout_row_major <= current_out_layout_row_major;
+                active_num_k_tiles          <= current_num_k_tiles;
+                active_num_out_tiles        <= current_num_out_tiles;
+                active_scale_q              <= current_scale_q;
+                state                       <= ST_START_LAYER;
             end
 
             ST_DONE: begin
@@ -224,9 +263,18 @@ always_ff @(posedge clk) begin
             end
 
             default: begin
-                state     <= ST_IDLE;
-                layer_idx <= '0;
-                done      <= 1'b0;
+                state                       <= ST_IDLE;
+                layer_idx                   <= '0;
+                done                        <= 1'b0;
+                active_act_base             <= '0;
+                active_wgt_base             <= '0;
+                active_out_base             <= '0;
+                active_wgt_out_stride       <= '0;
+                active_act_layout_row_major <= 1'b0;
+                active_out_layout_row_major <= 1'b0;
+                active_num_k_tiles          <= '0;
+                active_num_out_tiles        <= '0;
+                active_scale_q              <= '0;
             end
         endcase
     end
