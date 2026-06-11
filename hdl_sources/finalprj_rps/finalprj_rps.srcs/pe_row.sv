@@ -1,3 +1,5 @@
+`timescale 1ns / 1ps
+
 module PE_ROW #(
     parameter int N      = 16,
     parameter int DATA_W = 8,

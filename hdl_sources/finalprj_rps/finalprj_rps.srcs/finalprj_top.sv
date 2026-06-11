@@ -46,7 +46,7 @@ logic   [127:0]                 ctrl_pb_wdata;
 logic   [127:0]                 ctrl_pb_rdata;
 
 BRAM_TDP #(
-    .INIT_FILE          ("C:/Users/super/Workspace/Embedded_System_Lab/hdl_sources/finalprj_rps/finalprj_rps.srcs/bram_init.txt"            )
+    .INIT_FILE          ("C:/Users/super/Workspace/Embedded_System_Lab/bram_init.txt"            )
 ) u_bram (
     //Port A - I/O path  (read input matrix, write output matrix) + AXI
     .i_PA_ADDR          (ctrl_pa_addr               ),
@@ -308,7 +308,7 @@ endmodule
 //=========================================================================
 
 module BRAM_TDP #(
-    parameter INIT_FILE = "C:/Users/super/Workspace/Embedded_System_Lab/hdl_sources/finalprj_rps/finalprj_rps.srcs/bram_init.txt"
+    parameter INIT_FILE = "C:/Users/super/Workspace/Embedded_System_Lab/bram_init.txt"
 )(
     input   wire                i_CLK,
     input   wire                i_RST_n,

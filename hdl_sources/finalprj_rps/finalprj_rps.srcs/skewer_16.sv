@@ -1,3 +1,5 @@
+`timescale 1ns / 1ps
+
 module skewer_16 #(
     parameter int N      = 16,
     parameter int DATA_W = 8

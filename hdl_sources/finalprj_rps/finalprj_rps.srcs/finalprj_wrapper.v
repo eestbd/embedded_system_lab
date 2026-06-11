@@ -1,3 +1,5 @@
+`timescale 1ns / 1ps
+
 module finalprj_wrapper (
     input   wire            i_PROC_RESET_n,
     input   wire            i_PROC_START_n,

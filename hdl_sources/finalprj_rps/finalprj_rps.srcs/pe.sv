@@ -1,3 +1,5 @@
+`timescale 1ns / 1ps
+
 module PE #(
     parameter int DATA_W = 8,
     parameter int ACC_W  = 32

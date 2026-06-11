@@ -1,3 +1,5 @@
+`timescale 1ns / 1ps
+
 module acc_drain_16x16 #(
     parameter int N     = 16,
     parameter int ACC_W = 32

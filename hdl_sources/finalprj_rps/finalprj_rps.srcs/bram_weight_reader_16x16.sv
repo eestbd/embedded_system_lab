@@ -1,3 +1,5 @@
+`timescale 1ns / 1ps
+
 module bram_weight_reader_16x16 #(
     parameter int N      = 16,
     parameter int DATA_W = 8,
