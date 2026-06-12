@@ -1,5 +1,7 @@
 `timescale 1ns/1ps
 
+// 제출용 top module
+// AXI BRAM과 CONTROL을 연결해서 전체 4-layer MLP 실행을 시작함
 module finalprj_top (
     //ports : DO NOT MODIFY
     input   wire                    i_CLK,
@@ -34,19 +36,21 @@ module finalprj_top (
 // BRAM instance : You can freely configure ports A and B
 //=========================================================================
 
+// CONTROL이 BRAM port A로 activation read와 output write를 요청함
 logic   [13:0]                  ctrl_pa_addr;
 logic                           ctrl_pa_wr;
 logic   [127:0]                 ctrl_pa_wdata;
 logic   [127:0]                 ctrl_pa_rdata;
 logic                           ctrl_pa_busy;
 
+// port B는 weight read 경로로 사용
 logic   [13:0]                  ctrl_pb_addr;
 logic                           ctrl_pb_wr;
 logic   [127:0]                 ctrl_pb_wdata;
 logic   [127:0]                 ctrl_pb_rdata;
 
 BRAM_TDP #(
-    .INIT_FILE          ("C:/Users/super/Workspace/Embedded_System_Lab/bram_init.txt"            )
+    .INIT_FILE          ("bram_init.txt"            )
 ) u_bram (
     //Port A - I/O path  (read input matrix, write output matrix) + AXI
     .i_PA_ADDR          (ctrl_pa_addr               ),
@@ -117,6 +121,8 @@ endmodule
 // CONTROLLER: You can save it as a separate file
 //=========================================================================
 
+// proc_start를 받아 4-layer MLP sequencer를 한 번 실행하는 컨트롤러
+// BRAM port A/B 요청을 실제 BRAM_TDP 포트로 넘기는 역할도 같이 함
 module CONTROL (
     /* CLOCK AND RESET */
     input   wire                    i_CLK,
@@ -141,6 +147,7 @@ module CONTROL (
 // 4-layer MLP sequencer parameters
 //=========================================================================
 
+// 내부 MLP 엔진에서 사용하는 고정 파라미터
 localparam int N           = 16;
 localparam int DATA_W      = 8;
 localparam int ACC_W       = 32;
@@ -149,6 +156,7 @@ localparam int ADDR_W      = 14;
 localparam int SCALE_W     = 32;
 localparam int SCALE_FRAC  = 24;
 
+// top control은 start pulse, sequencer 대기, done 유지 정도만 담당
 typedef enum logic [2:0] {
     TOP_IDLE,
     TOP_START_SEQ,
@@ -182,6 +190,7 @@ logic [127:0] r_pa_read_data_capture;
 logic         r_pa_read_data_valid;
 
 assign seq_start = (r_state == TOP_START_SEQ);
+// AXI가 port A를 쓰는 중이면 sequencer를 잠시 멈춤
 assign seq_en    = !i_PA_BUSY;
 
 assign seq_bram_act_rdata = i_PA_RDATA;
@@ -259,6 +268,7 @@ always_ff @(posedge i_CLK or negedge i_RST_n) begin
             TOP_START_SEQ: begin
                 o_PROC_DONE <= 1'b0;
 
+                // BRAM port A가 비었을 때만 sequencer를 실제로 시작
                 if (seq_en) begin
                     r_state <= TOP_WAIT_SEQ;
                 end
@@ -268,6 +278,7 @@ always_ff @(posedge i_CLK or negedge i_RST_n) begin
                 o_PROC_DONE            <= 1'b0;
                 r_pa_read_data_capture <= i_PA_RDATA;
 
+                // sequencer가 끝나면 proc_done을 올릴 상태로 이동
                 if (seq_done) begin
                     r_pa_read_data_valid <= 1'b1;
                     r_state              <= TOP_DONE;
@@ -275,10 +286,12 @@ always_ff @(posedge i_CLK or negedge i_RST_n) begin
             end
 
             TOP_DONE: begin
+                // done은 다음 reset 전까지 유지
                 o_PROC_DONE <= 1'b1;
             end
 
             default: begin
+                // 이상 상태에서는 대기 상태로 복귀
                 r_state     <= TOP_IDLE;
                 o_PROC_DONE <= 1'b0;
             end
@@ -308,7 +321,7 @@ endmodule
 //=========================================================================
 
 module BRAM_TDP #(
-    parameter INIT_FILE = "C:/Users/super/Workspace/Embedded_System_Lab/bram_init.txt"
+    parameter INIT_FILE = "bram_init.txt"
 )(
     input   wire                i_CLK,
     input   wire                i_RST_n,
