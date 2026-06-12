@@ -107,7 +107,8 @@ always_comb begin
             current_wgt_base       = W1_BASE;
             current_out_base       = SCRATCH0_BASE;
             current_wgt_out_stride = 14'd768; // 48 K tiles * 16 words
-            current_act_layout_row_major = 1'b1; // input_spectrogram.bin is bram_init pre-tiled row-major
+            // input_spectrogram.bin is bram_init pre-tiled row-major
+            current_act_layout_row_major = 1'b1;
             current_out_layout_row_major = 1'b0;
             current_num_k_tiles    = 8'd48;
             current_num_out_tiles  = 8'd8;

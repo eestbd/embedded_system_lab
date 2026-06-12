@@ -473,7 +473,6 @@ begin
         $fatal(1);
     end
 
-    $display("NUMPY_REFERENCE_OUTPUT_MATCHED");
 end
 endtask
 
