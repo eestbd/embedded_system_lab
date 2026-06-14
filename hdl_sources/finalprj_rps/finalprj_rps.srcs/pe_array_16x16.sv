@@ -1,7 +1,7 @@
 `timescale 1ns / 1ps
 
-// N x N PE 배열
-// activation은 오른쪽으로, weight는 아래쪽으로 흘리면서 각 PE가 자기 위치의 합을 만듦
+// N x N PE array
+// Activations move right and weights move down, so each PE builds its own sum
 module PE_ARRAY_16x16 #(
     parameter int N = 16,
     parameter int DATA_W = 8,
@@ -20,7 +20,7 @@ module PE_ARRAY_16x16 #(
     output logic signed [ACC_W-1:0] o_acc_mat [0:N-1][0:N-1]
 );
 
-// PE 사이를 이어 주는 내부 배선, act는 행 방향, weight는 열 방향으로 한 칸씩 이동함
+// Internal links between PEs, with act moving by row and weight moving by column
 logic signed [DATA_W-1:0] act_pipe [0:N-1][0:N];
 logic signed [DATA_W-1:0] wgt_pipe [0:N][0:N-1];
 
@@ -28,19 +28,19 @@ genvar g_row;
 genvar g_col;
 
 generate
-    // 왼쪽 경계로 activation을 넣고, 오른쪽 끝 값을 밖으로 뺌
+    // Feed activations from the left edge and expose the right edge values
     for (g_row = 0; g_row < N; g_row++) begin : g_act_boundary
         assign act_pipe[g_row][0] = i_act_vec[g_row];
         assign o_act_last_vec[g_row] = act_pipe[g_row][N];
     end
 
-    // 위쪽 경계로 weight를 넣고, 아래쪽 끝 값을 밖으로 뺌
+    // Feed weights from the top edge and expose the bottom edge values
     for (g_col = 0; g_col < N; g_col++) begin : g_wgt_boundary
         assign wgt_pipe[0][g_col] = i_wgt_vec[g_col];
         assign o_wgt_last_vec[g_col] = wgt_pipe[N][g_col];
     end
 
-    // 실제 PE 배열 본체, 각 좌표에 PE 하나씩 배치
+    // Main PE grid, one PE at each row and column
     for (g_row = 0; g_row < N; g_row++) begin : g_pe_row
         for (g_col = 0; g_col < N; g_col++) begin : g_pe_col
             PE #(
@@ -53,7 +53,7 @@ generate
                 .i_en (i_en),
                 .i_act (act_pipe[g_row][g_col]),
                 .i_wgt (wgt_pipe[g_row][g_col]),
-                // PE 출력이 바로 오른쪽/아래쪽 PE의 입력으로 이어짐
+                // PE outputs connect straight into the PE on the right and below
                 .o_act (act_pipe[g_row][g_col+1]),
                 .o_wgt (wgt_pipe[g_row+1][g_col]),
                 .o_acc (o_acc_mat[g_row][g_col])

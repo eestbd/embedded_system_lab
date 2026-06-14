@@ -1,7 +1,7 @@
 `timescale 1ns / 1ps
 
-// PE array에 쌓인 accumulator matrix를 row 단위로 꺼내는 모듈
-// start 이후 row 0부터 N-1까지 한 cycle에 한 줄씩 내보냄
+// Drains the accumulator matrix from the PE array one row at a time
+// After start, rows 0 through N-1 come out one per cycle
 module acc_drain_16x16 #(
     parameter int N = 16,
     parameter int ACC_W = 32
@@ -21,7 +21,7 @@ module acc_drain_16x16 #(
     output logic done
 );
 
-// 대기, row 출력, done pulse 순서로 도는 간단한 FSM
+// Small FSM for idle, row output, and done pulse
 typedef enum logic [1:0] {
     ST_IDLE,
     ST_DRAIN,
@@ -48,7 +48,7 @@ always_ff @(posedge clk) begin
 
         if (en) begin
             case (state)
-                // start는 IDLE에서만 받고, 받는 순간 row 0을 바로 출력
+                // Accept start only in IDLE and output row 0 right away
                 ST_IDLE: begin
                     row_valid <= 1'b0;
                     busy <= 1'b0;
@@ -61,7 +61,7 @@ always_ff @(posedge clk) begin
                             row_vec[col] <= acc_mat[0][col];
                         end
 
-                        // N이 1이면 이미 마지막 row라 바로 DONE으로 이동
+                        // If N is 1, row 0 is already the last row
                         if (N == 1) begin
                             state <= ST_DONE;
                             next_row_idx <= '0;
@@ -73,7 +73,7 @@ always_ff @(posedge clk) begin
                     end
                 end
 
-                // enable된 cycle마다 accumulator row 하나씩 출력
+                // Output one accumulator row on each enabled cycle
                 ST_DRAIN: begin
                     row_valid <= 1'b1;
                     row_idx_out <= next_row_idx;
@@ -82,7 +82,7 @@ always_ff @(posedge clk) begin
                         row_vec[col] <= acc_mat[next_row_idx][col];
                     end
 
-                    // 마지막 row까지 내보내면 다음 cycle에 done pulse 발생
+                    // After the last row, the next cycle raises done
                     if (next_row_idx == N-1) begin
                         state <= ST_DONE;
                     end
@@ -91,7 +91,7 @@ always_ff @(posedge clk) begin
                     end
                 end
 
-                // 마지막 valid row 다음 cycle에 done을 한 번만 올림
+                // Raise done once, one cycle after the last valid row
                 ST_DONE: begin
                     row_valid <= 1'b0;
                     busy <= 1'b0;
@@ -100,7 +100,7 @@ always_ff @(posedge clk) begin
                 end
 
                 default: begin
-                    // 혹시 모를 이상 상태에서는 대기 상태로 복귀
+                    // Fall back to IDLE if the state ever gets out of range
                     state <= ST_IDLE;
                     row_valid <= 1'b0;
                     row_idx_out <= '0;

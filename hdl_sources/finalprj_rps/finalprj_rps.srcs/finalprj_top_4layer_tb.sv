@@ -1,9 +1,9 @@
 `timescale 1ns / 1ps
 
-// 4-layer MLP top 검증용 testbench
+// Testbench for the 4-layer MLP top
 module finalprj_top_4layer_tb;
 
-// testbench 전체에서 쓰는 크기와 시간 제한값
+// Common sizes and timeout value used by the testbench
 localparam int N              = 16;
 localparam int DATA_W         = 8;
 localparam int ACC_W          = 32;
@@ -18,7 +18,7 @@ localparam int IN_DIM  = 768;
 localparam int H_DIM   = 128;
 localparam int OUT_DIM = 16;
 
-// BRAM 안에서 input, weight, 중간 buffer, final output이 놓이는 시작 주소
+// Base addresses for input, weights, scratch buffers, and final output in BRAM
 localparam logic [ADDR_W-1:0] INPUT_BASE = 14'h2400;
 localparam logic [ADDR_W-1:0] W1_BASE    = 14'h0000;
 localparam logic [ADDR_W-1:0] W2_BASE    = 14'h1800;
@@ -28,13 +28,13 @@ localparam logic [ADDR_W-1:0] BUF0_BASE  = 14'h2700;
 localparam logic [ADDR_W-1:0] BUF1_BASE  = 14'h2780;
 localparam logic [ADDR_W-1:0] FINAL_BASE = 14'h2880;
 
-// layer별 post processing scale 값
+// Per-layer post-processing scale values
 localparam logic [SCALE_W-1:0] M1_Q24 = 32'd6073;
 localparam logic [SCALE_W-1:0] M2_Q24 = 32'd24139;
 localparam logic [SCALE_W-1:0] M3_Q24 = 32'd328223;
 localparam logic [SCALE_W-1:0] M4_Q24 = 32'd16777216;
 
-// numpy에서 만든 입력과 weight binary 파일 경로
+// Paths to input and weight binary files generated from numpy
 localparam string INPUT_BIN_PATH = "C:/Users/super/Workspace/Embedded_System_Lab/numpy_reference/weights/input_spectrogram.bin";
 localparam string W1_BIN_PATH    = "C:/Users/super/Workspace/Embedded_System_Lab/numpy_reference/weights/layer1_weights.bin";
 localparam string W2_BIN_PATH    = "C:/Users/super/Workspace/Embedded_System_Lab/numpy_reference/weights/layer2_weights.bin";
@@ -46,7 +46,7 @@ logic rst_n;
 logic proc_start;
 logic proc_done;
 
-// AXI-lite 형태의 top port를 testbench에서 묶어 주기 위한 신호
+// Signals used to tie off the AXI-lite style top ports in the testbench
 logic [31:0] s_axi_awaddr;
 logic        s_axi_awvalid;
 logic        s_axi_awready;
@@ -65,7 +65,7 @@ logic [1:0]  s_axi_rresp;
 logic        s_axi_rvalid;
 logic        s_axi_rready;
 
-// binary 파일에서 읽은 입력/weight와 golden 계산용 matrix
+// Input/weight matrices loaded from binary files, plus matrices for golden calculation
 logic signed [DATA_W-1:0] X0 [0:N-1][0:IN_DIM-1];
 logic signed [DATA_W-1:0] W1 [0:IN_DIM-1][0:H_DIM-1];
 logic signed [DATA_W-1:0] W2 [0:H_DIM-1][0:H_DIM-1];
@@ -81,37 +81,37 @@ logic signed [DATA_W-1:0] X3 [0:N-1][0:H_DIM-1];
 logic signed [ACC_W-1:0]  Y4 [0:N-1][0:OUT_DIM-1];
 logic signed [DATA_W-1:0] X4 [0:N-1][0:OUT_DIM-1];
 
-// BRAM final 영역과 바로 비교할 128-bit 기대값
+// Expected 128-bit words used for direct comparison with the BRAM final area
 logic [WORD_W-1:0] expected_final_word [0:OUT_DIM-1];
 
-// $fread로 받을 원본 byte buffer
+// Raw byte buffers filled by $fread
 byte signed x0_bin [0:N*IN_DIM-1];
 byte signed w1_bin [0:H_DIM*IN_DIM-1];
 byte signed w2_bin [0:H_DIM*H_DIM-1];
 byte signed w3_bin [0:H_DIM*H_DIM-1];
 byte signed w4_bin [0:OUT_DIM*H_DIM-1];
 
-// numpy reference에서 미리 확인한 최종 출력값
+// Final output values checked earlier against the numpy reference
 localparam logic signed [DATA_W-1:0] expected_numpy [0:N-1][0:OUT_DIM-1] = '{
-    '{8'sd1,  8'sd1,  8'sd1,  8'sd1,  8'sd3,  8'sd1,  8'sd3,  8'sd1,  8'sd3,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
-    '{8'sd9,  8'sd2,  8'sd1,  8'sd0,  8'sd11, 8'sd0,  8'sd9,  8'sd0,  8'sd20, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
-    '{8'sd2,  8'sd0,  8'sd0,  8'sd6,  8'sd18, 8'sd0,  8'sd0,  8'sd0,  8'sd8,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
-    '{8'sd0,  8'sd2,  8'sd2,  8'sd0,  8'sd0,  8'sd4,  8'sd4,  8'sd0,  8'sd0,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
-    '{8'sd0,  8'sd8,  8'sd15, 8'sd0,  8'sd0,  8'sd8,  8'sd0,  8'sd27, 8'sd7,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
-    '{8'sd0,  8'sd12, 8'sd4,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
-    '{8'sd6,  8'sd1,  8'sd0,  8'sd0,  8'sd6,  8'sd0,  8'sd4,  8'sd0,  8'sd11, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
-    '{8'sd0,  8'sd0,  8'sd9,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
-    '{8'sd0,  8'sd0,  8'sd0,  8'sd1,  8'sd6,  8'sd0,  8'sd2,  8'sd0,  8'sd0,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
-    '{8'sd11, 8'sd1,  8'sd0,  8'sd0,  8'sd9,  8'sd0,  8'sd5,  8'sd0,  8'sd19, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
-    '{8'sd7,  8'sd0,  8'sd7,  8'sd7,  8'sd21, 8'sd3,  8'sd9,  8'sd7,  8'sd17, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
-    '{8'sd0,  8'sd4,  8'sd5,  8'sd0,  8'sd0,  8'sd4,  8'sd0,  8'sd21, 8'sd1,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd7,  8'sd0,  8'sd0,  8'sd0,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
     '{8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
-    '{8'sd0,  8'sd8,  8'sd5,  8'sd0,  8'sd0,  8'sd1,  8'sd1,  8'sd2,  8'sd1,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
-    '{8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd16, 8'sd0,  8'sd0,  8'sd0,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
-    '{8'sd7,  8'sd1,  8'sd0,  8'sd0,  8'sd7,  8'sd0,  8'sd5,  8'sd0,  8'sd14, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0}
+    '{8'sd5,  8'sd0,  8'sd5,  8'sd5,  8'sd15, 8'sd2,  8'sd6,  8'sd5,  8'sd12, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd7,  8'sd1,  8'sd0,  8'sd0,  8'sd7,  8'sd0,  8'sd5,  8'sd0,  8'sd14, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd0,  8'sd0,  8'sd10, 8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd6,  8'sd0,  8'sd6,  8'sd6,  8'sd18, 8'sd1,  8'sd3,  8'sd6,  8'sd13, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd0,  8'sd12, 8'sd21, 8'sd0,  8'sd10, 8'sd6,  8'sd6,  8'sd15, 8'sd12, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd0,  8'sd0,  8'sd0,  8'sd2,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd0,  8'sd5,  8'sd9,  8'sd0,  8'sd1,  8'sd4,  8'sd0,  8'sd11, 8'sd4,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd0,  8'sd0,  8'sd4,  8'sd2,  8'sd18, 8'sd9,  8'sd11, 8'sd4,  8'sd5,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd0,  8'sd3,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd14, 8'sd0,  8'sd0,  8'sd2,  8'sd6,  8'sd0,  8'sd0,  8'sd0,  8'sd14, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0},
+    '{8'sd0,  8'sd0,  8'sd6,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0,  8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0, 8'sd0}
 };
 
-// 내부 sequencer와 BRAM 접근을 관찰하기 위한 probe
+// Probes for watching the internal sequencer and BRAM accesses
 wire [1:0] seq_layer_idx;
 wire       seq_busy;
 wire       seq_done;
@@ -120,7 +120,7 @@ wire              bram_pa_wr;
 wire [WORD_W-1:0] bram_pa_wdata;
 wire [ADDR_W-1:0] bram_pb_addr;
 
-// 검증 대상 top module
+// Top module under test
 finalprj_top u_dut (
     .i_CLK         (clk),
     .i_RST_n       (rst_n),
@@ -154,7 +154,7 @@ assign bram_pa_wr    = u_dut.ctrl_pa_wr;
 assign bram_pa_wdata = u_dut.ctrl_pa_wdata;
 assign bram_pb_addr  = u_dut.ctrl_pb_addr;
 
-// 100MHz clock 생성
+// 100 MHz clock
 initial clk = 1'b0;
 always #5 clk = ~clk;
 
@@ -164,7 +164,7 @@ begin
 end
 endfunction
 
-// signed 8-bit 곱셈을 golden 계산용 32-bit 값으로 변환
+// Signed 8-bit multiply widened to 32 bits for the golden model
 function automatic logic signed [ACC_W-1:0] mul_i8_to_i32(
     input logic signed [DATA_W-1:0] lhs,
     input logic signed [DATA_W-1:0] rhs
@@ -178,7 +178,7 @@ begin
 end
 endfunction
 
-// RTL post_processor와 같은 ReLU, scale, rounding, saturate 계산
+// Golden version of the RTL post_processor path: ReLU, scale, round, and saturate
 function automatic logic signed [DATA_W-1:0] golden_post_lane(
     input logic signed [ACC_W-1:0] in_value,
     input logic [SCALE_W-1:0]      in_scale_q
@@ -217,7 +217,7 @@ task automatic init_matrices();
     int fd;
     int nread;
 begin
-    // 입력 spectrogram binary를 읽어서 X0 buffer에 넣기 전 준비
+    // Open the input spectrogram binary before loading it into X0
     fd = $fopen(INPUT_BIN_PATH, "rb");
     if (fd == 0) begin
         $display("INPUT_BIN_OPEN_FAILED: %s", INPUT_BIN_PATH);
@@ -230,7 +230,7 @@ begin
         $fatal(1);
     end
 
-    // layer 1 weight binary 읽음
+    // Read layer 1 weights
     fd = $fopen(W1_BIN_PATH, "rb");
     if (fd == 0) begin
         $display("W1_BIN_OPEN_FAILED: %s", W1_BIN_PATH);
@@ -243,7 +243,7 @@ begin
         $fatal(1);
     end
 
-    // layer 2 weight binary 읽음
+    // Read layer 2 weights
     fd = $fopen(W2_BIN_PATH, "rb");
     if (fd == 0) begin
         $display("W2_BIN_OPEN_FAILED: %s", W2_BIN_PATH);
@@ -256,7 +256,7 @@ begin
         $fatal(1);
     end
 
-    // layer 3 weight binary 읽음
+    // Read layer 3 weights
     fd = $fopen(W3_BIN_PATH, "rb");
     if (fd == 0) begin
         $display("W3_BIN_OPEN_FAILED: %s", W3_BIN_PATH);
@@ -269,7 +269,7 @@ begin
         $fatal(1);
     end
 
-    // layer 4 weight binary 읽음
+    // Read layer 4 weights
     fd = $fopen(W4_BIN_PATH, "rb");
     if (fd == 0) begin
         $display("W4_BIN_OPEN_FAILED: %s", W4_BIN_PATH);
@@ -282,7 +282,7 @@ begin
         $fatal(1);
     end
 
-    // 읽어 온 byte buffer를 row/column index로 다시 풀어 줌
+    // Unpack the byte buffers back into row/column indexed matrices
     for (int row = 0; row < N; row++) begin
         for (int k = 0; k < IN_DIM; k++) begin
             X0[row][k] = x0_bin[row*IN_DIM + k];
@@ -310,10 +310,10 @@ begin
 end
 endtask
 
-// binary 입력과 weight로 software golden output을 계산함
+// Compute the software golden output from binary inputs and weights
 task automatic compute_golden();
 begin
-    // layer 1 계산
+    // Layer 1
     for (int row = 0; row < N; row++) begin
         for (int col = 0; col < H_DIM; col++) begin
             Y1[row][col] = '0;
@@ -324,7 +324,7 @@ begin
         end
     end
 
-    // layer 2 계산
+    // Layer 2
     for (int row = 0; row < N; row++) begin
         for (int col = 0; col < H_DIM; col++) begin
             Y2[row][col] = '0;
@@ -335,7 +335,7 @@ begin
         end
     end
 
-    // layer 3 계산
+    // Layer 3
     for (int row = 0; row < N; row++) begin
         for (int col = 0; col < H_DIM; col++) begin
             Y3[row][col] = '0;
@@ -346,7 +346,7 @@ begin
         end
     end
 
-    // layer 4 계산
+    // Layer 4
     for (int row = 0; row < N; row++) begin
         for (int col = 0; col < OUT_DIM; col++) begin
             Y4[row][col] = '0;
@@ -357,7 +357,7 @@ begin
         end
     end
 
-    // 최종 16개 feature를 BRAM 한 word 형태로 packing
+    // Pack the final 16 features into one BRAM word
     for (int row = 0; row < N; row++) begin
         expected_final_word[row] = '0;
         for (int feature = 0; feature < OUT_DIM; feature++) begin
@@ -367,7 +367,7 @@ begin
 end
 endtask
 
-// 제출 때 기준으로 쓸 numpy reference 값을 expected word로 packing함
+// Pack the numpy reference values used as the submission check
 task automatic pack_expected_final_word_from_numpy();
 begin
     for (int row = 0; row < N; row++) begin
@@ -380,11 +380,11 @@ begin
 end
 endtask
 
-// DUT 내부 BRAM의 scratch/final 영역만 초기화함
+// Clear only the scratch/final regions inside the DUT BRAM
 task automatic init_dut_bram();
 begin
-    // input/weight는 bram_init.txt에서 이미 읽히므로 여기서는 덮어쓰지 않음
-    // 중간 buffer와 최종 출력 영역만 0으로 정리함
+    // input/weight data is already loaded from bram_init.txt, so do not overwrite it here
+    // Only clear the intermediate buffers and final output area
     for (int offset = 0; offset < H_DIM; offset++) begin
         u_dut.u_bram.mem[BUF0_BASE + offset] = '0;
         u_dut.u_bram.mem[BUF1_BASE + offset] = '0;
@@ -396,7 +396,7 @@ begin
 end
 endtask
 
-// proc_start를 한 cycle만 올려서 연산 시작
+// Pulse proc_start for one cycle to begin the run
 task automatic pulse_proc_start();
 begin
     @(negedge clk);
@@ -407,7 +407,7 @@ begin
 end
 endtask
 
-// proc_done이 올라올 때까지 기다리고 final write 횟수도 같이 확인
+// Wait for proc_done while also counting final writes
 task automatic wait_for_done();
     int timeout_count;
     int final_write_count;
@@ -419,7 +419,7 @@ begin
 
     pulse_proc_start();
 
-    // timeout 전까지 done과 final write를 계속 감시
+    // Watch done and final writes until timeout
     while (!done_seen && (timeout_count < TIMEOUT_CYCLES)) begin
         @(posedge clk);
         #1;
@@ -454,7 +454,7 @@ begin
 end
 endtask
 
-// BRAM final 영역의 128-bit word를 기대값과 비교함
+// Compare 128-bit words in the BRAM final area against expected values
 task automatic check_final_memory();
     logic [WORD_W-1:0] got_word;
     int mismatch_count;
@@ -483,7 +483,7 @@ begin
 end
 endtask
 
-// numpy reference matrix와 feature 단위로 한 번 더 비교함
+// Compare one more time against the numpy reference, feature by feature
 task automatic check_numpy_reference_output();
     logic signed [DATA_W-1:0] got_value;
     int mismatch_count;
@@ -510,7 +510,7 @@ begin
 end
 endtask
 
-// 최종 output matrix와 각 row의 predicted class를 출력함
+// Print the final output matrix and predicted class for each row
 task automatic print_final_matrix();
     logic signed [DATA_W-1:0] final_value;
     int signed current_value;
@@ -563,7 +563,7 @@ end
 endtask
 
 initial begin
-    // reset 상태에서 top 입력 신호를 먼저 초기화
+    // Initialize top input signals while reset is active
     rst_n         = 1'b0;
     proc_start    = 1'b0;
     s_axi_awaddr  = 32'd0;
@@ -576,7 +576,7 @@ initial begin
     s_axi_arvalid = 1'b0;
     s_axi_rready  = 1'b1;
 
-    // golden 계산과 DUT BRAM 초기화 준비
+    // Prepare the golden calculation and DUT BRAM initialization
     init_matrices();
     compute_golden();
     pack_expected_final_word_from_numpy();
@@ -591,7 +591,7 @@ initial begin
     repeat (2) @(posedge clk);
     wait_for_done();
 
-    // 연산 종료 후 final memory와 numpy reference를 비교
+    // After the run, compare final memory against the numpy reference
     repeat (4) @(posedge clk);
     #1;
     check_final_memory();

@@ -1,7 +1,7 @@
 `timescale 1ns / 1ps
 
-// output tile 하나를 계산하는 16x16 엔진
-// K tile을 순서대로 읽어서 PE array에 누산하고, 마지막에 BRAM output으로 저장함
+// 16x16 engine that computes one output tile
+// Reads K tiles in order, accumulates them in the PE array, then writes the output to BRAM
 module output_tile_engine_feature_major_16x16 #(
     parameter int N = 16,
     parameter int DATA_W = 8,
@@ -48,17 +48,17 @@ module output_tile_engine_feature_major_16x16 #(
     output logic done
 );
 
-// row index, 카운터, 주소 offset에 필요한 폭 계산
+// Widths for row indexes, counters, and address offsets
 localparam int ROW_W = (N <= 1) ? 1 : $clog2(N);
 localparam int COUNT_W = (N <= 1) ? 1 : $clog2(N + 1);
 localparam int CLEAR_CNT_W = (CLEAR_CYCLES <= 1) ? 1 : $clog2(CLEAR_CYCLES);
-// raw stream register가 한 단계 있어서 flush cycle에 같이 반영
+// One raw stream register stage is included in the flush count
 localparam int STREAM_STAGE_CYCLES = 1;
 localparam int EFFECTIVE_FLUSH_CYCLES = FLUSH_CYCLES + STREAM_STAGE_CYCLES;
 localparam int FLUSH_CNT_W = (EFFECTIVE_FLUSH_CYCLES <= 1) ? 1 : $clog2(EFFECTIVE_FLUSH_CYCLES);
 localparam int OFFSET_W = ADDR_W + K_TILES_W;
 
-// reader, PE array, drain, writer까지 한 output tile 흐름을 관리하는 FSM
+// FSM for the full output-tile flow: readers, PE array, drain, and writer
 typedef enum logic [3:0] {
     ST_IDLE,
     ST_CLEAR_ARRAY,
@@ -88,11 +88,11 @@ logic reader_raw_valid;
 logic signed [DATA_W-1:0] reader_raw_act_vec [0:N-1];
 logic signed [DATA_W-1:0] reader_raw_wgt_vec [0:N-1];
 
-// reader에서 받은 16개 stream vector를 PE array에 다시 넣기 전 잠시 저장
+// Holds the 16 stream vectors from the readers before replaying them into the PE array
 logic signed [DATA_W-1:0] act_buf [0:N-1][0:N-1];
 logic signed [DATA_W-1:0] wgt_buf [0:N-1][0:N-1];
 
-// skewer 앞뒤로 지나가는 activation/weight stream
+// Activation and weight streams before and after the skewers
 logic signed [DATA_W-1:0] stream_act_vec [0:N-1];
 logic signed [DATA_W-1:0] stream_wgt_vec [0:N-1];
 logic signed [DATA_W-1:0] raw_act_vec [0:N-1];
@@ -104,7 +104,7 @@ logic signed [DATA_W-1:0] array_act_last_vec [0:N-1];
 logic signed [DATA_W-1:0] array_wgt_last_vec [0:N-1];
 logic signed [ACC_W-1:0]  acc_mat [0:N-1][0:N-1];
 
-// 누산 결과를 row 단위로 빼고 post processor로 넘기기 위한 신호
+// Signals for draining accumulated rows and sending them to the post processor
 logic drain_start;
 logic drain_row_valid;
 logic [ROW_W-1:0] drain_row_idx;
@@ -117,7 +117,7 @@ logic signed [ACC_W-1:0] drain_row_vec [0:N-1];
 logic post_out_valid;
 logic signed [DATA_W-1:0] post_out_vec [0:N-1];
 
-// output layout에 따라 둘 중 하나의 writer만 start됨
+// Only one writer starts, depending on the requested output layout
 logic writer_start;
 logic writer_busy;
 logic writer_done;
@@ -138,7 +138,7 @@ logic [K_TILES_W-1:0] k_tile_idx;
 logic [K_TILES_W-1:0] num_k_tiles_m1;
 logic last_k_tile;
 
-// reader capture, PE feed, clear/flush cycle을 세는 카운터들
+// Counters for reader capture, PE feed, clear cycles, and flush cycles
 logic [COUNT_W-1:0] reader_valid_count;
 logic [COUNT_W-1:0] feed_count;
 logic [CLEAR_CNT_W-1:0] clear_count;
@@ -157,14 +157,14 @@ logic [ADDR_W-1:0] current_wgt_base;
 
 assign busy = (state != ST_IDLE);
 
-// FSM state에서 하위 모듈로 들어가는 start pulse 생성
+// Start pulses for submodules, generated from the FSM state
 assign reader_start = en && (state == ST_START_READER);
 assign writer_start = en && (state == ST_START_WRITER);
 assign writer_feature_start = writer_start && !out_layout_row_major;
 assign writer_row_start = writer_start && out_layout_row_major;
 assign drain_start  = en && (state == ST_DRAIN_START);
 assign reader_raw_valid = act_reader_raw_valid && wgt_reader_raw_valid;
-// 최종 저장 layout에 맞춰 writer 출력 mux 선택
+// Select writer outputs based on the final storage layout
 assign writer_busy = out_layout_row_major ? writer_row_busy : writer_feature_busy;
 assign writer_done = out_layout_row_major ? writer_row_done : writer_feature_done;
 assign bram_out_wr = out_layout_row_major ? writer_row_bram_wr : writer_feature_bram_wr;
@@ -172,14 +172,14 @@ assign bram_out_addr = out_layout_row_major ? writer_row_bram_addr : writer_feat
 assign bram_out_wdata = out_layout_row_major ? writer_row_bram_wdata : writer_feature_bram_wdata;
 
 assign component_clear = clear || (en && (state == ST_CLEAR_ARRAY));
-// PE array 쪽 datapath는 clear, stream, flush 구간에서만 움직임
+// PE-array datapath runs only during clear, stream, and flush phases
 assign datapath_en = en && ((state == ST_CLEAR_ARRAY) || (state == ST_STREAM_TO_ARRAY) || (state == ST_FLUSH_ARRAY));
 
 assign feed_index = feed_count[ROW_W-1:0];
 assign num_k_tiles_m1 = num_k_tiles - 1'b1;
 assign last_k_tile = (k_tile_idx == num_k_tiles_m1);
 
-// 현재 K tile 번호에 stride를 곱해서 activation/weight base 주소 계산
+// Compute activation and weight base addresses from the current K tile and stride
 assign k_idx_ext = {{ADDR_W{1'b0}}, k_tile_idx};
 assign act_stride_ext = {{K_TILES_W{1'b0}}, act_k_stride};
 assign wgt_stride_ext = {{K_TILES_W{1'b0}}, wgt_k_stride};
@@ -191,7 +191,7 @@ assign current_wgt_base = wgt_base_addr + wgt_k_offset[ADDR_W-1:0];
 generate
     genvar g_lane;
     for (g_lane = 0; g_lane < N; g_lane++) begin : g_stream_mux
-        // stream 상태일 때만 buffer 값을 PE array 쪽으로 재생
+        // Replay buffered values into the PE array only in the stream state
         assign stream_act_vec[g_lane] = (state == ST_STREAM_TO_ARRAY) ? act_buf[feed_index][g_lane] : '0;
         assign stream_wgt_vec[g_lane] = (state == ST_STREAM_TO_ARRAY) ? wgt_buf[feed_index][g_lane] : '0;
     end
@@ -206,14 +206,14 @@ always_ff @(posedge clk) begin
     end
     else if (datapath_en) begin
         for (int lane = 0; lane < N; lane++) begin
-            // skewer 앞에 한 stage를 두고 stream 값을 넘김
+            // Add one register stage before the skewers
             raw_act_vec[lane] <= stream_act_vec[lane];
             raw_wgt_vec[lane] <= stream_wgt_vec[lane];
         end
     end
 end
 
-// 현재 K tile의 activation word들을 읽어 오는 reader
+// Reader for activation words in the current K tile
 bram_activation_reader_16x16 #(
     .N (N),
     .DATA_W(DATA_W),
@@ -236,7 +236,7 @@ bram_activation_reader_16x16 #(
     .done (act_reader_done)
 );
 
-// 현재 K tile의 weight word들을 activation과 같은 타이밍으로 읽어 옴
+// Reader for weight words in the current K tile, timed with activation reads
 bram_weight_reader_16x16 #(
     .N (N),
     .DATA_W(DATA_W),
@@ -258,7 +258,7 @@ bram_weight_reader_16x16 #(
     .done (wgt_reader_done)
 );
 
-// activation stream에 lane별 지연을 걸어 systolic 입력 타이밍을 맞춤
+// Skew the activation stream per lane to match systolic timing
 skewer_16 #(
     .N (N),
     .DATA_W(DATA_W)
@@ -271,7 +271,7 @@ skewer_16 #(
     .vec_out (act_vec_skewed)
 );
 
-// weight stream도 같은 방식으로 skew를 줌
+// Skew the weight stream the same way
 skewer_16 #(
     .N (N),
     .DATA_W (DATA_W)
@@ -284,7 +284,7 @@ skewer_16 #(
     .vec_out (wgt_vec_skewed)
 );
 
-// skew가 맞춰진 activation/weight를 16x16 PE array에 입력
+// Feed the skew-aligned activation and weight streams into the 16x16 PE array
 PE_ARRAY_16x16 #(
     .N     (N),
     .DATA_W(DATA_W),
@@ -301,7 +301,7 @@ PE_ARRAY_16x16 #(
     .o_acc_mat (acc_mat)
 );
 
-// 모든 K tile 누산이 끝난 뒤 acc_mat을 row 단위로 꺼냄
+// Drain acc_mat row by row after all K tiles have accumulated
 acc_drain_16x16 #(
     .N    (N),
     .ACC_W(ACC_W)
@@ -319,7 +319,7 @@ acc_drain_16x16 #(
     .done (drain_done)
 );
 
-// drain된 row에 ReLU, scale, rounding, saturation 적용
+// Apply ReLU, scale, rounding, and saturation to drained rows
 post_processor_16 #(
     .N (N),
     .ACC_W (ACC_W),
@@ -338,7 +338,7 @@ post_processor_16 #(
     .out_vec (post_out_vec)
 );
 
-// 중간 layer output은 다음 layer reader가 읽기 좋게 feature-major로 저장
+// Intermediate layer outputs are stored feature-major for the next layer reader
 bram_output_writer_feature_major_16x16 #(
     .N (N),
     .DATA_W (DATA_W),
@@ -361,7 +361,7 @@ bram_output_writer_feature_major_16x16 #(
     .done (writer_feature_done)
 );
 
-// 마지막 layer output은 PS/Vitis가 보기 좋게 row-major로 저장
+// Final layer output is stored row-major for PS/Vitis
 bram_output_writer_16x16 #(
     .N (N),
     .DATA_W(DATA_W),
@@ -418,14 +418,14 @@ always_ff @(posedge clk) begin
                 drain_row_idx_d2 <= '0;
 
                 if (start) begin
-                    // output tile 시작할 때 PE accumulator를 한 번만 clear
-                    // K tile이 바뀔 때는 acc_mat partial sum을 유지함
+                    // Clear the PE accumulators only once at the start of an output tile
+                    // Keep acc_mat partial sums when moving to the next K tile
                     state <= ST_CLEAR_ARRAY;
                 end
             end
 
             ST_CLEAR_ARRAY: begin
-                // PE 내부 accumulator와 forwarding path 초기화 구간
+                // Clear phase for PE accumulators and forwarding paths
                 reader_valid_count <= '0;
                 feed_count <= '0;
                 flush_count <= '0;
@@ -442,14 +442,14 @@ always_ff @(posedge clk) begin
             end
 
             ST_START_READER: begin
-                // 현재 K tile에 대해 reader start pulse 한 번 발생
+                // Raise one reader start pulse for the current K tile
                 reader_valid_count <= '0;
                 state <= ST_CAPTURE_READER;
             end
 
             ST_CAPTURE_READER: begin
                 if (reader_raw_valid) begin
-                    // activation과 weight reader가 같이 valid일 때만 buffer에 저장
+                    // Store into buffers only when activation and weight readers are both valid
                     for (int lane = 0; lane < N; lane++) begin
                         act_buf[reader_valid_count][lane] <= reader_raw_act_vec[lane];
                         wgt_buf[reader_valid_count][lane] <= reader_raw_wgt_vec[lane];
@@ -467,7 +467,7 @@ always_ff @(posedge clk) begin
             end
 
             ST_STREAM_TO_ARRAY: begin
-                // buffer에 모아 둔 16개 stream vector를 PE array로 다시 흘림
+                // Replay the 16 buffered stream vectors into the PE array
                 if (feed_count == N-1) begin
                     feed_count <= '0;
                     flush_count <= '0;
@@ -479,8 +479,8 @@ always_ff @(posedge clk) begin
             end
 
             ST_FLUSH_ARRAY: begin
-                // 0을 흘려서 systolic forwarding path를 비우는 구간
-                // acc_mat은 유지해서 다음 K tile partial sum과 이어짐
+                // Push zeros through to flush the systolic forwarding paths
+                // Keep acc_mat so the next K tile continues the partial sums
                 if (flush_count == EFFECTIVE_FLUSH_CYCLES-1) begin
                     flush_count <= '0;
                     if (last_k_tile) begin
@@ -496,7 +496,7 @@ always_ff @(posedge clk) begin
             end
 
             ST_NEXT_K_TILE: begin
-                // K tile index만 증가시키고 PE accumulator는 유지
+                // Advance only the K tile index and keep the PE accumulators
                 k_tile_idx <= k_tile_idx + 1'b1;
                 reader_valid_count <= '0;
                 feed_count <= '0;
@@ -508,25 +508,25 @@ always_ff @(posedge clk) begin
             end
 
             ST_START_WRITER: begin
-                // drain/post가 valid row를 만들기 전에 writer를 먼저 대기시킴
+                // Start the writer before drain/post produce valid rows
                 state <= ST_DRAIN_START;
             end
 
             ST_DRAIN_START: begin
-                // drain_start pulse 한 번 발생
-                // acc_drain row 0 출력 뒤 post_processor에서 한 cycle 더 걸림
+                // Raise one drain_start pulse
+                // post_processor takes one more cycle after acc_drain outputs row 0
                 state <= ST_DRAIN_AND_POST;
             end
 
             ST_DRAIN_AND_POST: begin
-                // acc_drain이 끝날 때까지 post_processor와 writer가 valid row를 처리
+                // Let the post processor and writer handle valid rows until acc_drain finishes
                 if (drain_done) begin
                     state <= ST_WRITE_WAIT;
                 end
             end
 
             ST_WRITE_WAIT: begin
-                // 선택된 writer가 BRAM write를 마칠 때까지 대기
+                // Wait until the selected writer finishes the BRAM writes
                 if (writer_done) begin
                     done  <= 1'b1;
                     state <= ST_DONE;
@@ -534,12 +534,12 @@ always_ff @(posedge clk) begin
             end
 
             ST_DONE: begin
-                // done은 ST_WRITE_WAIT에서 올리고 여기서 IDLE로 복귀
+                // done is raised in ST_WRITE_WAIT, then this state returns to IDLE
                 state <= ST_IDLE;
             end
 
             default: begin
-                // 이상 상태에서는 내부 진행 상태를 초기화하고 IDLE로 복귀
+                // Reset internal progress and return to IDLE on an unexpected state
                 state <= ST_IDLE;
                 k_tile_idx <= '0;
                 reader_valid_count <= '0;

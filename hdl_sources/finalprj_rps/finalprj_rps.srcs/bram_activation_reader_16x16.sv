@@ -1,7 +1,7 @@
 `timescale 1ns / 1ps
 
-// activation 16x16 타일을 BRAM에서 읽어서 PE array 입력 순서로 풀어주는 모듈
-// BRAM word 16개를 먼저 받아 두고, k 방향으로 한 줄씩 내보냄
+// Reads a 16x16 activation tile from BRAM and feeds it in PE-array order
+// Caches 16 BRAM words first, then emits one k step at a time
 module bram_activation_reader_16x16 #(
     parameter int N = 16,
     parameter int DATA_W = 8,
@@ -14,8 +14,8 @@ module bram_activation_reader_16x16 #(
     input logic start,
     input logic en,
 
-    // 1이면 bram_init에서 온 row-major 입력 타일
-    // 0이면 중간 layer에서 나온 feature-major 타일
+    // 1 means the input tile is row-major from bram_init
+    // 0 means an intermediate feature-major tile
     input logic row_major_layout,
     input logic [ADDR_W-1:0] act_base_addr,
 
@@ -30,11 +30,11 @@ module bram_activation_reader_16x16 #(
     output logic done
 );
 
-// N번 읽고 N번 내보내기 위한 카운터 폭
+// Counter widths for N reads and N emits
 localparam int COUNT_W = (N <= 1) ? 1 : $clog2(N + 1);
 localparam int IDX_W = (N <= 1) ? 1 : $clog2(N);
 
-// BRAM 주소 요청, 대기, 캡처, 출력 순서로 도는 FSM
+// FSM order: request BRAM address, wait, capture, then emit
 typedef enum logic [2:0] {
     ST_IDLE,
     ST_READ_ADDR_SET,
@@ -51,10 +51,10 @@ logic [COUNT_W-1:0] emit_count;
 logic [IDX_W-1:0] read_index;
 logic [IDX_W-1:0] emit_index;
 
-// BRAM에서 읽은 16x16 activation 타일을 잠시 저장하는 버퍼
+// Temporary buffer for the 16x16 activation tile read from BRAM
 logic signed [DATA_W-1:0] tile_buf [0:N-1][0:N-1];
 
-// done 상태는 한 사이클만 따로 보고, 나머지 작업 중인 상태를 busy로 봄
+// DONE is a one-cycle state, and the other non-idle states count as busy
 assign busy = (state != ST_IDLE) && (state != ST_DONE);
 assign read_index = read_count[IDX_W-1:0];
 assign emit_index = emit_count[IDX_W-1:0];
@@ -91,20 +91,20 @@ always_ff @(posedge clk) begin
             end
 
             ST_READ_ADDR_SET: begin
-                // BRAM 주소만 먼저 걸어 주는 단계
-                // 데이터는 다음 클럭 이후에 들어와서 여기서는 잡지 않음
+                // Put only the BRAM address out in this stage
+                // Data arrives after the next clock, so nothing is captured here
                 bram_act_en <= 1'b1;
                 bram_act_addr <= act_base_addr + read_count;
                 state <= ST_READ_WAIT;
             end
 
             ST_READ_WAIT: begin
-                // 동기 BRAM 지연 맞추려고 한 사이클 기다림
+                // Wait one cycle to match synchronous BRAM latency
                 state <= ST_READ_CAPTURE;
             end
 
             ST_READ_CAPTURE: begin
-                // 한 word 안의 16개 lane을 현재 read_index 줄에 저장
+                // Store the 16 lanes from one word into the current read_index row
                 for (int lane = 0; lane < N; lane++) begin
                     tile_buf[read_index][lane] <= bram_act_rdata[DATA_W*lane +: DATA_W];
                 end
@@ -124,11 +124,11 @@ always_ff @(posedge clk) begin
                 raw_valid <= 1'b1;
                 for (int lane = 0; lane < N; lane++) begin
                     if (row_major_layout) begin
-                        // 입력 layer는 word 하나가 row 하나라서 k_inner 기준으로 세로로 꺼냄
+                        // For the input layer, each word is a row, so pull by k_inner vertically
                         raw_act_vec[lane] <= tile_buf[lane][emit_index];
                     end
                     else begin
-                        // 중간 layer는 이미 feature-major라 저장된 줄을 그대로 사용
+                        // Intermediate layers are already feature-major, so use the stored row directly
                         raw_act_vec[lane] <= tile_buf[emit_index][lane];
                     end
                 end
@@ -143,13 +143,13 @@ always_ff @(posedge clk) begin
             end
 
             ST_DONE: begin
-                // done을 한 사이클 올리고 다시 대기 상태로 감
+                // Raise done for one cycle, then return to idle
                 done <= 1'b1;
                 state <= ST_IDLE;
             end
 
             default: begin
-                // 이상 상태로 들어오면 안전하게 초기 상태로 복귀
+                // Return to the initial state if an unexpected state is reached
                 state <= ST_IDLE;
                 read_count <= '0;
                 emit_count <= '0;
