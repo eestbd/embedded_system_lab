@@ -34,12 +34,12 @@ localparam logic [SCALE_W-1:0] M2_Q24 = 32'd24139;
 localparam logic [SCALE_W-1:0] M3_Q24 = 32'd328223;
 localparam logic [SCALE_W-1:0] M4_Q24 = 32'd16777216;
 
-// Paths to input and weight binary files generated from numpy
-localparam string INPUT_BIN_PATH = "C:/Users/super/Workspace/Embedded_System_Lab/numpy_reference/weights/input_spectrogram.bin";
-localparam string W1_BIN_PATH    = "C:/Users/super/Workspace/Embedded_System_Lab/numpy_reference/weights/layer1_weights.bin";
-localparam string W2_BIN_PATH    = "C:/Users/super/Workspace/Embedded_System_Lab/numpy_reference/weights/layer2_weights.bin";
-localparam string W3_BIN_PATH    = "C:/Users/super/Workspace/Embedded_System_Lab/numpy_reference/weights/layer3_weights.bin";
-localparam string W4_BIN_PATH    = "C:/Users/super/Workspace/Embedded_System_Lab/numpy_reference/weights/layer4_weights.bin";
+// Input and weight binary files generated from numpy_reference/weights
+localparam string INPUT_BIN_FILE = "input_spectrogram.bin";
+localparam string W1_BIN_FILE    = "layer1_weights.bin";
+localparam string W2_BIN_FILE    = "layer2_weights.bin";
+localparam string W3_BIN_FILE    = "layer3_weights.bin";
+localparam string W4_BIN_FILE    = "layer4_weights.bin";
 
 logic clk;
 logic rst_n;
@@ -158,6 +158,54 @@ assign bram_pb_addr  = u_dut.ctrl_pb_addr;
 initial clk = 1'b0;
 always #5 clk = ~clk;
 
+task automatic try_weight_path(
+    input  string dir_name,
+    input  string filename,
+    inout  int    fd,
+    output string path
+);
+begin
+    if (fd == 0) begin
+        path = {dir_name, filename};
+        fd = $fopen(path, "rb");
+    end
+end
+endtask
+
+task automatic open_weight_bin(
+    input  string label_name,
+    input  string filename,
+    output int    fd,
+    output string path
+);
+    string weights_dir;
+begin
+    fd = 0;
+    path = "";
+
+    if ($value$plusargs("WEIGHTS_DIR=%s", weights_dir)) begin
+        path = {weights_dir, "/", filename};
+        fd = $fopen(path, "rb");
+    end
+
+    try_weight_path("../../../../../../numpy_reference/weights/", filename, fd, path);
+    try_weight_path("../../numpy_reference/weights/", filename, fd, path);
+    try_weight_path("numpy_reference/weights/", filename, fd, path);
+    try_weight_path("../numpy_reference/weights/", filename, fd, path);
+    try_weight_path("../../../numpy_reference/weights/", filename, fd, path);
+    try_weight_path("../../../../numpy_reference/weights/", filename, fd, path);
+    try_weight_path("../../../../../numpy_reference/weights/", filename, fd, path);
+
+    if (fd == 0) begin
+        $display("%s_BIN_OPEN_FAILED: %s", label_name, filename);
+        $display("Set +WEIGHTS_DIR=<path-to-numpy_reference/weights> or keep the full Embedded_System_Lab folder layout.");
+        $fatal(1);
+    end
+
+    $display("%s_BIN_PATH: %s", label_name, path);
+end
+endtask
+
 function automatic logic signed [DATA_W-1:0] to_data(input int signed value);
 begin
     to_data = value;
@@ -216,69 +264,50 @@ endfunction
 task automatic init_matrices();
     int fd;
     int nread;
+    string bin_path;
 begin
     // Open the input spectrogram binary before loading it into X0
-    fd = $fopen(INPUT_BIN_PATH, "rb");
-    if (fd == 0) begin
-        $display("INPUT_BIN_OPEN_FAILED: %s", INPUT_BIN_PATH);
-        $fatal(1);
-    end
+    open_weight_bin("INPUT", INPUT_BIN_FILE, fd, bin_path);
     nread = $fread(x0_bin, fd);
     $fclose(fd);
     if (nread != N*IN_DIM) begin
-        $display("INPUT_BIN_SIZE_MISMATCH: expected %0d bytes, got %0d", N*IN_DIM, nread);
+        $display("INPUT_BIN_SIZE_MISMATCH: %s expected %0d bytes, got %0d", bin_path, N*IN_DIM, nread);
         $fatal(1);
     end
 
     // Read layer 1 weights
-    fd = $fopen(W1_BIN_PATH, "rb");
-    if (fd == 0) begin
-        $display("W1_BIN_OPEN_FAILED: %s", W1_BIN_PATH);
-        $fatal(1);
-    end
+    open_weight_bin("W1", W1_BIN_FILE, fd, bin_path);
     nread = $fread(w1_bin, fd);
     $fclose(fd);
     if (nread != H_DIM*IN_DIM) begin
-        $display("W1_BIN_SIZE_MISMATCH: expected %0d bytes, got %0d", H_DIM*IN_DIM, nread);
+        $display("W1_BIN_SIZE_MISMATCH: %s expected %0d bytes, got %0d", bin_path, H_DIM*IN_DIM, nread);
         $fatal(1);
     end
 
     // Read layer 2 weights
-    fd = $fopen(W2_BIN_PATH, "rb");
-    if (fd == 0) begin
-        $display("W2_BIN_OPEN_FAILED: %s", W2_BIN_PATH);
-        $fatal(1);
-    end
+    open_weight_bin("W2", W2_BIN_FILE, fd, bin_path);
     nread = $fread(w2_bin, fd);
     $fclose(fd);
     if (nread != H_DIM*H_DIM) begin
-        $display("W2_BIN_SIZE_MISMATCH: expected %0d bytes, got %0d", H_DIM*H_DIM, nread);
+        $display("W2_BIN_SIZE_MISMATCH: %s expected %0d bytes, got %0d", bin_path, H_DIM*H_DIM, nread);
         $fatal(1);
     end
 
     // Read layer 3 weights
-    fd = $fopen(W3_BIN_PATH, "rb");
-    if (fd == 0) begin
-        $display("W3_BIN_OPEN_FAILED: %s", W3_BIN_PATH);
-        $fatal(1);
-    end
+    open_weight_bin("W3", W3_BIN_FILE, fd, bin_path);
     nread = $fread(w3_bin, fd);
     $fclose(fd);
     if (nread != H_DIM*H_DIM) begin
-        $display("W3_BIN_SIZE_MISMATCH: expected %0d bytes, got %0d", H_DIM*H_DIM, nread);
+        $display("W3_BIN_SIZE_MISMATCH: %s expected %0d bytes, got %0d", bin_path, H_DIM*H_DIM, nread);
         $fatal(1);
     end
 
     // Read layer 4 weights
-    fd = $fopen(W4_BIN_PATH, "rb");
-    if (fd == 0) begin
-        $display("W4_BIN_OPEN_FAILED: %s", W4_BIN_PATH);
-        $fatal(1);
-    end
+    open_weight_bin("W4", W4_BIN_FILE, fd, bin_path);
     nread = $fread(w4_bin, fd);
     $fclose(fd);
     if (nread != OUT_DIM*H_DIM) begin
-        $display("W4_BIN_SIZE_MISMATCH: expected %0d bytes, got %0d", OUT_DIM*H_DIM, nread);
+        $display("W4_BIN_SIZE_MISMATCH: %s expected %0d bytes, got %0d", bin_path, OUT_DIM*H_DIM, nread);
         $fatal(1);
     end
 
